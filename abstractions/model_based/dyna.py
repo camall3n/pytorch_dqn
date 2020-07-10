@@ -19,6 +19,7 @@ class DynaAgent:
         self.state_space = state_space
         self.action_space = action_space
         self.gamma = gamma
+        self.device = args.device
         self.critic = DQN_MLP_model(
             args.device, state_space.shape[0], action_space, action_space.shape[0], args.model_shape
         )
@@ -33,16 +34,23 @@ class DynaAgent:
     def act(self, state):
         return self.action_space.sample()
 
+    def train(self, experience):
+        torch_experience = self.torchify(experience)
+
+        td_error = self.update_agent(torch_experience)
+        self.queue_rollouts(experience, 0, td_error)
+        self.update_model(torch_experience)
+
     def plan(self):
         query = self.queries.pop_max()
         new_state, new_reward = self.rollout(query)
         new_return = new_reward + self.gamma * query.inner_return
         simulated_experience = Experience(new_state, query.action, new_return, query.final_state, query.done)
         td_error = self.update_agent(simulated_experience, n_step=query.n+1).detach()
+        self.queue_rollouts(simulated_experience, query.n+1, td_error)
 
-        self.queue_rollouts(new_state, new_return, query.final_state, query.done, query.n+1, td_error)
-
-    def queue_rollouts(self, state, inner_return, final_state, done, n, td_error):
+    def queue_rollouts(self, experience, n, td_error):
+        state, _, inner_return, final_state, done = experience
         priority = torch.abs(td_error) * self.priority_decay**n
         if priority > self.priority_threshold:
             for action in range(self.action_space.n):
@@ -65,12 +73,10 @@ class DynaAgent:
         self.critic_optimizer.zero_grad()
         loss.backward()
         self.critic_optimizer.step()
-        return td_error
+        return td_error.detach().cpu().numpy()
 
     def update_model(self, experience, td_error):
-        state, action, reward, next_state, done = experience
-        self.queue_rollouts(state, reward, next_state, done, 0, td_error)
-
+        state, action, reward, next_state, _ = self._torchify(experience)
         prev_state, prev_reward = self.model(next_state, action)
         state_loss = torch.nn.functional.mse_loss(input=prev_state, target=state)
         reward_loss = torch.nn.functional.mse_loss(input=prev_reward, target=reward)
@@ -79,6 +85,15 @@ class DynaAgent:
         loss.backward()
         self.model_optimizer.step()
 
+    def _torchify(self, experiences):
+        states, actions, rewards, next_states, dones = experiences
+        states = torch.from_numpy(states).float().to(self.device)
+        next_states = torch.from_numpy(next_states).float().to(self.device)
+        actions = torch.from_numpy(actions).long().to(self.device)
+        rewards = torch.from_numpy(rewards).float().to(self.device)
+        dones = torch.from_numpy(dones).byte().to(self.device)
+        experiences = states, actions, rewards, next_states, dones
+        return experiences
 
 def train_agent(args):
     env = gym.make('CartPole-v1')
@@ -90,8 +105,7 @@ def train_agent(args):
             action = agent.act(state)
             next_state, reward, done, _ = env.step(action)
             experience = Experience(state, action, reward, next_state, done)
-            td_error = agent.update_agent(experience)
-            agent.update_model(experience, td_error)
+            agent.train(experience)
             state = next_state if not done else env.reset()
         for _ in range(args.planning_steps_per_iter):
             agent.plan()
