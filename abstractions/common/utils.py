@@ -112,6 +112,9 @@ sac_parser.add_argument('--ari', action='store_true', required=False,
 
 model_based_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)
+model_based_parser.add_argument('--iterations', type=int, default=100)
+model_based_parser.add_argument('--interactions-per-iter', type=int, default=4)
+model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=32)
 
 ## DQN utils ##
 
@@ -121,8 +124,8 @@ def init_weights(m):
         torch.nn.init.uniform_(m.bias, -1, 1)
 
 def conv2d_size_out(size, kernel_size, stride):
-    ''' Adapted from pytorch tutorials: 
-        https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html 
+    ''' Adapted from pytorch tutorials:
+        https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
     '''
     return ((size[0] - (kernel_size[0] - 1) - 1) // stride + 1,
             (size[1] - (kernel_size[1] - 1) - 1) // stride + 1)
@@ -138,11 +141,11 @@ def plot_grad_flow(named_parameters):
 
     Plots the gradients flowing through different layers in the net during training.
     Can be used for checking for possible gradient vanishing / exploding problems.
-    
-    Usage: Plug this function in Trainer class after loss.backwards() as 
+
+    Usage: Plug this function in Trainer class after loss.backwards() as
     "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow
 
-    writer.add_figure('training/gradient_flow', plot_grad_flow(agent.online.named_parameters(), 
+    writer.add_figure('training/gradient_flow', plot_grad_flow(agent.online.named_parameters(),
         episode), global_step=episode)
 
     '''
