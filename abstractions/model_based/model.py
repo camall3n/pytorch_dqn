@@ -34,11 +34,12 @@ class ModelNet(torch.nn.Module):
                         activation=torch.nn.ReLU,
                         final_activation=torch.nn.ReLU
         )
-
         self.state_head = torch.nn.Linear(self.layer_sizes[-1], self.state_space.shape[0])
         self.reward_head = torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1)
-        self.done_head = torch.nn.Sequential(torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1),
-            torch.nn.Sigmoid())
+        self.done_head = torch.nn.Sequential(
+            torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1),
+            torch.nn.Sigmoid(),
+        )
 
     def forward(self, state, action):
         state = torch.as_tensor(state, dtype=torch.float32).to(self.device)
@@ -56,7 +57,7 @@ class ModelNet(torch.nn.Module):
         reward = torch.as_tensor(reward, dtype=torch.float32).unsqueeze(-1).to(self.device)
         done = torch.as_tensor(done, dtype=torch.float32).unsqueeze(-1).to(self.device)
 
-        state_loss = torch.nn.functional.mse_loss(pred_state, next_state) 
+        state_loss = torch.nn.functional.mse_loss(pred_state, next_state)
         reward_loss = torch.nn.functional.mse_loss(pred_reward, reward)
         done_loss = torch.nn.functional.binary_cross_entropy(pred_done, done)
 
