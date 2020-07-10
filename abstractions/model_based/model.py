@@ -36,10 +36,10 @@ class ModelNet(torch.nn.Module):
         )
         self.state_head = torch.nn.Linear(self.layer_sizes[-1], self.state_space.shape[0])
         self.reward_head = torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1)
-        self.done_head = torch.nn.Sequential(
-            torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1),
-            torch.nn.Sigmoid(),
-        )
+        # self.done_head = torch.nn.Sequential(
+        #     torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1),
+        #     torch.nn.Sigmoid(),
+        # )
 
     def forward(self, state, action):
         state = torch.as_tensor(state, dtype=torch.float32).to(self.device)
@@ -47,7 +47,7 @@ class ModelNet(torch.nn.Module):
         output = self.body(torch.cat([state, action], dim=1))
         pred_state = self.state_head(output)
         sasp_input = torch.cat([state, pred_state, action], dim=1)
-        return pred_state, self.reward_head(sasp_input), self.done_head(sasp_input)
+        return pred_state, self.reward_head(sasp_input)#, self.done_head(sasp_input)
 
     def loss(self, batch, writer=None, writer_step=None):
         state, action, reward, next_state, done = batch
@@ -55,13 +55,13 @@ class ModelNet(torch.nn.Module):
 
         next_state = torch.as_tensor(next_state, dtype=torch.float32).to(self.device)
         reward = torch.as_tensor(reward, dtype=torch.float32).unsqueeze(-1).to(self.device)
-        done = torch.as_tensor(done, dtype=torch.float32).unsqueeze(-1).to(self.device)
+        # done = torch.as_tensor(done, dtype=torch.float32).unsqueeze(-1).to(self.device)
 
         state_loss = torch.nn.functional.mse_loss(pred_state, next_state)
         reward_loss = torch.nn.functional.mse_loss(pred_reward, reward)
-        done_loss = torch.nn.functional.binary_cross_entropy(pred_done, done)
+        # done_loss = torch.nn.functional.binary_cross_entropy(pred_done, done)
 
-        loss = state_loss + reward_loss + done_loss
+        loss = state_loss + reward_loss #+ done_loss
 
         if writer:
             writer.add_scalar('stepwise/reward_loss', reward_loss.mean(), writer_step)
