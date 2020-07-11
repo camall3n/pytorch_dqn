@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 import math
 from typing import Any
 
-from minmaxheap import MinMaxHeap
+from .minmaxheap import MinMaxHeap
 
 @dataclass(order=True)
 class PQueueItem:
@@ -56,7 +56,7 @@ class PriorityQueue():
             while len(self.heap) > maxlen:
                 self._eject_one()
         self.n_items = len(self.heap)
-        self.lookup = {item.data: item for item in self.heap}
+        self.lookup = {item.data: self._hashable(item) for item in self.heap}
         self.REMOVED = '<removed>'
 
     def __len__(self):
@@ -64,13 +64,14 @@ class PriorityQueue():
 
     def push(self, item, priority):
         """Add a new item or update the priority of an existing item"""
-        if item in self.lookup:
-            self.remove(item)
-        item = PQueueItem(priority, item)
+        hashable = self._hashable(item)
+        if hashable in self.lookup:
+            self.remove(hashable)
+        wrapped = PQueueItem(priority, item)
         if self.maxlen is not None and len(self) >= self.maxlen:
             should_eject = (
-                (self.mode == 'max' and self._peek_min().priority < item.priority)
-                or (self.mode == 'min' and self._peek_max().priority > item.priority)
+                (self.mode == 'max' and self._peek_min().priority < wrapped.priority)
+                or (self.mode == 'min' and self._peek_max().priority > wrapped.priority)
             )
             if should_eject:
                 self._eject_one()
@@ -78,13 +79,13 @@ class PriorityQueue():
                 return # not enough room; drop this item
         else:
             self.n_items += 1
-        self.heap.push(item)
-        self.lookup[item.data] = item
+        self.heap.push(wrapped)
+        self.lookup[self._hashable(wrapped.data)] = wrapped
 
     def remove(self, item):
         """Mark an existing item as REMOVED.  Raise KeyError if not found."""
-        entry = self.lookup.pop(item)
-        entry.data = self.REMOVED
+        wrapped = self.lookup.pop(self._hashable(item))
+        wrapped.data = self.REMOVED
         self.n_items -= 1
 
     def peek_min(self):
@@ -94,9 +95,9 @@ class PriorityQueue():
     def _peek_min(self):
         """Return the lowest priority PQItem without removing it"""
         while self.heap:
-            item = self.heap.peek_min()
-            if item.data is not self.REMOVED:
-                return item
+            wrapped = self.heap.peek_min()
+            if wrapped.data is not self.REMOVED:
+                return wrapped
             self.heap.pop_min()
         raise KeyError('peek called on empty priority queue')
 
@@ -107,30 +108,30 @@ class PriorityQueue():
     def _peek_max(self):
         """Return the highest priority PQItem without removing it"""
         while self.heap:
-            item = self.heap.peek_max()
-            if item.data is not self.REMOVED:
-                return item
+            wrapped = self.heap.peek_max()
+            if wrapped.data is not self.REMOVED:
+                return wrapped
             self.heap.pop_max()
         raise KeyError('peek called on empty priority queue')
 
     def pop_min(self):
         """Remove and return the lowest priority item"""
         while self.heap:
-            item = self.heap.pop_min()
-            if item.data is not self.REMOVED:
+            wrapped = self.heap.pop_min()
+            if wrapped.data is not self.REMOVED:
                 self.n_items -= 1
-                del self.lookup[item.data]
-                return item.data
+                del self.lookup[self._hashable(wrapped.data)]
+                return wrapped.data
         raise KeyError('pop called on empty priority queue')
 
     def pop_max(self):
         """Remove and return the highest priority item"""
         while self.heap:
-            item = self.heap.pop_max()
-            if item.data is not self.REMOVED:
+            wrapped = self.heap.pop_max()
+            if wrapped.data is not self.REMOVED:
                 self.n_items -= 1
-                del self.lookup[item.data]
-                return item.data
+                del self.lookup[self._hashable(wrapped.data)]
+                return wrapped.data
         raise KeyError('pop called on empty priority queue')
 
     def _eject_one(self):
@@ -144,6 +145,14 @@ class PriorityQueue():
         """Return the list of (priority, data) tuples in the queue"""
         return iter(item.data for item in self.heap if item.data is not self.REMOVED)
 
+    def _hashable(self, item):
+        try:
+            hash(item)
+        except TypeError:
+            hashable = repr(item)
+        else:
+            hashable = item
+        return hashable
 
 
 def test_basics():
