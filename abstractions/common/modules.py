@@ -23,6 +23,15 @@ class Reshape(torch.nn.Module):
     def forward(self, x):
         return x.view(*self.shape)
 
+def one_hot(x, depth):
+    """Convert a batch of indices to a batch of one-hot vectors
+
+    Parameters
+    ----------
+    depth : int
+        The length of each output vector
+    """
+    return torch.eye(depth, dtype=x.dtype, device=x.device)[x]
 
 ## DQN ##
 
