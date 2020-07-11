@@ -1,6 +1,6 @@
 import torch
 
-from ..common.modules import MLP
+from ..common.modules import MLP, one_hot
 
 class ModelNet(torch.nn.Module):
     def __init__(self, args, device, state_space, action_space):
@@ -42,8 +42,7 @@ class ModelNet(torch.nn.Module):
         # )
 
     def forward(self, state, action):
-        state = torch.as_tensor(state, dtype=torch.float32).to(self.device)
-        action = torch.as_tensor(action, dtype=torch.float32).unsqueeze(-1).to(self.device)
+        action = action.float()
         output = self.body(torch.cat([state, action], dim=1))
         pred_state = self.state_head(output)
         sasp_input = torch.cat([state, pred_state, action], dim=1)
