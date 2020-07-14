@@ -1,5 +1,6 @@
 from collections import namedtuple
 import math
+import resource
 
 import gym
 import numpy as np
@@ -40,6 +41,7 @@ class DynaAgent:
         self.priority_decay = args.priority_decay
         self.max_rollout_length = args.max_rollout_length
         self.warmup_period = args.warmup_period
+        self.batchsize = args.batchsize
         self.model_loss_threshold = args.model_loss_threshold
 
         self.critic_optimizer = torch.optim.Adam(self.critic.parameters(), lr=args.lr)
@@ -73,45 +75,61 @@ class DynaAgent:
     def test(self, test_env, n_episodes):
         with torch.no_grad():
             total_reward = 0
+            experiences = []
             for _ in range(n_episodes):
                 state = test_env.reset()
                 done = False
                 while not done:
-                    action = self.act(state)
+                    action = self.act(state, eval=True)
                     next_state, reward, done, _ = test_env.step(action)
+                    experiences.append(Experience(
+                        state, action, reward, next_state, done
+                    ))
                     total_reward += reward
                     state = next_state
             avg_reward = total_reward / n_episodes
+            batch = self._torchify_experience(Experience(*list(zip(*experiences))))
+            model_loss, state_loss, reward_loss, abs_error = self._compute_model_loss(batch)
             if self.writer:
-                self.writer.add_scalar('dyna/test_episode_reward', avg_reward, self.global_step)
+                self.writer.add_scalar('evaluation/episode_reward', avg_reward, self.global_step)
+                self.writer.add_scalar('evaluation/model_loss', model_loss.mean(), self.global_step)
+                self.writer.add_scalar('evaluation/state_loss', state_loss.mean(), self.global_step)
+                self.writer.add_scalar('evaluation/reward_loss', reward_loss.mean(), self.global_step)
+                self.writer.add_scalar('evaluation/model_state_abs_err', abs_error.mean(), self.global_step)
 
-    def plan(self, simulator_steps):
-        if self.global_step < self.warmup_period:
-            return
+    def plan(self, steps):
         query_list = []
-        for _ in range(simulator_steps):
+        for _ in range(steps*self.batchsize):
             if self.queries:
                 query_list.append(self.queries.pop_max())
-        if query_list:
-            trajectories = self.rollout(query_list)
-            batch = Experience(
-                trajectories.state,
-                trajectories.action,
-                trajectories.inner_return,
-                trajectories.final_state,
-                trajectories.done
+        if not query_list:
+            return
+        trajectories = self.rollout(query_list)
+        batch_start = 0
+        while True:
+            experience_batch = Experience(
+                trajectories.state[batch_start:batch_start+self.batchsize],
+                trajectories.action[batch_start:batch_start+self.batchsize],
+                trajectories.inner_return[batch_start:batch_start+self.batchsize],
+                trajectories.final_state[batch_start:batch_start+self.batchsize],
+                trajectories.done[batch_start:batch_start+self.batchsize],
             )
-            td_errors = self.update_agent(batch, trajectories.n)
-            cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), batch))
-            experiences = list(map(lambda x: Experience(*x), zip(*cpu_batch)))
-            for experience, n, td_error in zip(experiences, trajectories.n, td_errors):
-                self.queue_rollouts(experience, n.detach().cpu().numpy(), td_error)
+            n_steps = trajectories.n[batch_start:batch_start+self.batchsize]
+            batch_start += self.batchsize
+            if len(experience_batch.state) == 0:
+                break
+            td_errors = self.update_agent(experience_batch, n_steps)
+            cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), experience_batch))
+            experience_list = list(map(lambda x: Experience(*x), zip(*cpu_batch)))
+            rollout_lengths = trajectories.n.detach().cpu().numpy()
+            for experience, n, td_error in zip(experience_list, rollout_lengths, td_errors):
+                self.queue_rollouts(experience, n, td_error)
 
     def queue_rollouts(self, experience, n, td_error):
         state, _, inner_return, final_state, done = experience
         priority = np.abs(td_error) * self.priority_decay**n
         if priority > self.priority_threshold:
-            if self.max_rollout_length is None or (n < self.max_rollout_length):
+            if self.max_rollout_length is None or (n <= self.max_rollout_length):
                 for action in np.arange(self.action_space.n):
                     new_query = Trajectory(action, state, inner_return, final_state, done, n)
                     self.queries.push(new_query, priority)
@@ -121,15 +139,18 @@ class DynaAgent:
         batch = self._torchify_planning_query(batch)
         new_state, new_reward = self.model(batch.state, batch.action)
         new_return = new_reward.detach().squeeze(-1) + self.gamma * batch.inner_return
-        simulated_experiences = Trajectory(
+        trajectories = Trajectory(
             batch.action,
             new_state.detach(),
             new_return,
             batch.final_state,
             batch.done,
-            batch.n
+            batch.n + 1,
         )
-        return simulated_experiences
+        if self.writer:
+            mean_rollout_length = trajectories.n.cpu().float().mean()
+            self.writer.add_scalar('dyna/mean_rollout_length', mean_rollout_length, self.global_step)
+        return trajectories
 
     def update_agent(self, batch, n_steps=0):
         q_predictions = self.critic(batch.state)
@@ -159,24 +180,30 @@ class DynaAgent:
         soft_update(self.critic_target, self.critic, tau=self.target_moving_average)
         return td_error.detach().cpu().numpy()
 
-    def update_model(self, batch):
+    def _compute_model_loss(self, batch):
         state, action, reward, next_state, _ = batch
         prev_state, prev_reward = self.model(next_state, action)
         state_loss = torch.nn.functional.smooth_l1_loss(input=prev_state, target=state)
-        reward_loss = torch.nn.functional.smooth_l1_loss(input=prev_reward, target=reward,)
+        reward_loss = torch.nn.functional.smooth_l1_loss(input=prev_reward.squeeze(), target=reward)
         loss = state_loss + reward_loss
+        with torch.no_grad():
+            abs_error = (prev_state.detach()-state).abs()
+        return loss, state_loss, reward_loss, abs_error
+
+    def update_model(self, batch):
+        loss, state_loss, reward_loss, abs_error = self._compute_model_loss(batch)
         self.model_optimizer.zero_grad()
         loss.backward()
         self.model_optimizer.step()
         if self.writer:
             self.writer.add_scalar('dyna/model_loss', loss.detach(), self.global_step)
             self.writer.add_scalar('dyna/model_state_loss', state_loss.detach(), self.global_step)
-            self.writer.add_scalar('dyna/model_state_abs_err', (prev_state.detach()-state).abs().mean(), self.global_step)
+            self.writer.add_scalar('dyna/model_state_abs_err', abs_error.mean(), self.global_step)
             self.writer.add_scalar('dyna/model_reward_loss', reward_loss.detach(), self.global_step)
         return loss.detach()
 
     def _torchify_experience(self, batch):
-        batch = map(np.stack, batch)
+        batch = list(map(np.stack, batch))
         states, actions, rewards, next_states, dones = batch
         states = torch.from_numpy(states).float().to(self.device)
         actions = torch.from_numpy(actions).long().to(self.device).unsqueeze(-1)
@@ -219,12 +246,14 @@ def train_agent(args):
                 print(episode, ep_reward)
                 if agent.writer:
                     agent.writer.add_scalar('dyna/episode', episode, agent.global_step)
-                    agent.writer.add_scalar('dyna/train_episode_reward', ep_reward, agent.global_step)
-
+                    # agent.writer.add_scalar('dyna/train_episode_reward', ep_reward, agent.global_step)
                 ep_reward = 0
         agent.train(experiences)
-        agent.plan(simulator_steps=args.planning_steps_per_iter)
+        agent.plan(steps=args.planning_steps_per_iter)
         agent.test(test_env, args.episodes_per_eval)
+        if agent.writer:
+            memory_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1.0e9
+            agent.writer.add_scalar('system/memory_usage_gb', memory_usage, agent.global_step)
 
 if __name__ == "__main__":
     args = model_based_parser.parse_args()
