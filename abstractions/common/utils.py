@@ -116,7 +116,7 @@ model_based_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDe
         parents=[common_parser], add_help=False)
 model_based_parser.add_argument('--iterations', type=int, default=10000)
 model_based_parser.add_argument('--interactions-per-iter', type=int, default=32)
-model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=2)
+model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=0)
 model_based_parser.add_argument('--epsilon-decay-rate', type=float, default=0.999)
 model_based_parser.add_argument('--epsilon-final')
 model_based_parser.add_argument('--warmup-period', type=float_to_int, default=1000)

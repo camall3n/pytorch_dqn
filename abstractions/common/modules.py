@@ -37,7 +37,7 @@ def one_hot(x, depth):
 
 
 class MLP(torch.nn.Module):
-    def __init__(self, layer_sizes, activation=torch.nn.ReLU, final_activation=None):
+    def __init__(self, layer_sizes, activation=torch.nn.LeakyReLU, final_activation=None):
         super(MLP, self).__init__()
         layer_shapes = list(zip(layer_sizes[:-1], layer_sizes[1:]))
         layers = []
