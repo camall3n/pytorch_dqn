@@ -13,9 +13,13 @@ from abstractions.common.utils import model_based_parser, soft_update, hard_upda
 from abstractions.model_based.model import ModelNet
 from abstractions.model_free.dqn.model import DQN_MLP_model
 
-Trajectory = namedtuple('Trajectory',
+PlanningQuery = namedtuple('PlanningQuery',
     ('action', 'state', 'inner_return', 'final_state', 'done', 'n')
-)
+) # To be rolled out (i.e. generate a prev_state that leads to 'state' via 'action')
+
+Trajectory = namedtuple('Trajectory',
+    ('state', 'action', 'inner_return', 'final_state', 'done', 'n')
+) # Fully rolled out (i.e. 'action' was selected in 'state')
 
 class DynaAgent:
     def __init__(self, state_space, action_space, gamma, args):
@@ -131,17 +135,16 @@ class DynaAgent:
         if priority > self.priority_threshold:
             if self.max_rollout_length is None or (n <= self.max_rollout_length):
                 for action in np.arange(self.action_space.n):
-                    new_query = Trajectory(action, state, inner_return, final_state, done, n)
+                    new_query = PlanningQuery(action, state, inner_return, final_state, done, n)
                     self.queries.push(new_query, priority)
 
-    def rollout(self, batch):
-        batch = Trajectory(*list(zip(*batch)))
-        batch = self._torchify_planning_query(batch)
+    def rollout(self, query_list):
+        batch = self._torchify_planning_query(PlanningQuery(*list(zip(*query_list))))
         new_state, new_reward = self.model(batch.state, batch.action)
         new_return = new_reward.detach().squeeze(-1) + self.gamma * batch.inner_return
         trajectories = Trajectory(
-            batch.action,
             new_state.detach(),
+            batch.action,
             new_return,
             batch.final_state,
             batch.done,
@@ -222,7 +225,7 @@ class DynaAgent:
         final_state = torch.from_numpy(final_state).float().to(self.device)
         done = torch.from_numpy(done).byte().to(self.device)
         n_steps = torch.from_numpy(n_steps).long().to(self.device)
-        batch = Trajectory(action, state, inner_return, final_state, done, n_steps)
+        batch = PlanningQuery(action, state, inner_return, final_state, done, n_steps)
         return batch
 
 def train_agent(args):
