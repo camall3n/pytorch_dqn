@@ -8,7 +8,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from abstractions.common.pqueue import PriorityQueue
-from abstractions.common.replay_buffer import Experience
+from abstractions.common.replay_buffer import ReplayBuffer, Experience
 from abstractions.common.utils import model_based_parser, soft_update, hard_update
 from abstractions.model_based.model import ModelNet
 from abstractions.model_free.dqn.model import DQN_MLP_model
@@ -41,6 +41,7 @@ class DynaAgent:
 
         self.model = ModelNet(args, args.device, state_space, action_space).to(device=args.device)
         self.queries = PriorityQueue(maxlen=10000, mode='max')
+        self.replay = ReplayBuffer(args.replay_buffer_size)
         self.priority_threshold = args.priority_threshold
         self.priority_decay = args.priority_decay
         self.max_rollout_length = args.max_rollout_length
@@ -66,13 +67,18 @@ class DynaAgent:
             self.writer.add_scalar('dyna/epsilon', self.epsilon, self.global_step)
         return action
 
-    def train(self, experiences):
-        batch = self._torchify_experience(Experience(*list(zip(*experiences))))
-        td_errors = self.update_agent(batch)
-        loss = self.update_model(batch)
-        if loss < self.model_loss_threshold:
-            for experience, td_error in zip(experiences, td_errors):
-                self.queue_rollouts(experience, 0, td_error)
+    def train(self, experiences, training_updates):
+        for experience in experiences:
+            self.replay.append(experience)
+
+        if len(self.replay) >= self.warmup_period:
+            for _ in range(training_updates):
+                batch = self._torchify_experience(self.replay.sample(self.batchsize))
+                td_errors = self.update_agent(batch)
+                loss = self.update_model(batch)
+                if loss < self.model_loss_threshold:
+                    for experience, td_error in zip(experiences, td_errors):
+                        self.queue_rollouts(experience, 0, td_error)
         if self.writer:
             self.writer.add_scalar('dyna/queue_length', len(self.queries), self.global_step)
 
@@ -251,7 +257,7 @@ def train_agent(args):
                     agent.writer.add_scalar('dyna/episode', episode, agent.global_step)
                     # agent.writer.add_scalar('dyna/train_episode_reward', ep_reward, agent.global_step)
                 ep_reward = 0
-        agent.train(experiences)
+        agent.train(experiences, training_updates=args.training_updates_per_iter)
         agent.plan(steps=args.planning_steps_per_iter)
         agent.test(test_env, args.episodes_per_eval)
         if agent.writer:
