@@ -42,7 +42,7 @@ common_parser.add_argument('--render-episodes', type=int, required=False, defaul
         help='Render every these many episodes')
 common_parser.add_argument('--replay-buffer-size', type=float_to_int, required=False, default=50000,
         help='Max size of replay buffer')
-common_parser.add_argument('--lr', type=float, required=False, default=0.001,
+common_parser.add_argument('--lr', type=float, required=False, default=0.00003,
         help='Learning rate for the optimizer')
 common_parser.add_argument('--batchsize', type=int, required=False, default=32,
         help='Number of experiences sampled from replay buffer')
@@ -55,8 +55,6 @@ common_parser.add_argument('--model-shape', type=str, default='medium',
         help="Shape of architecture (mlp only)")
 common_parser.add_argument('--num-frames', type=int, required=False, default=4,
         help='Number of frames to stack (CNN only)')
-common_parser.add_argument('--warmup-period', type=float_to_int, required=False, default=2000,
-        help='Number of steps to act randomly and not train')
 common_parser.add_argument('--episodes-per-eval', type=int, default=10,
         help='Number of episodes per evaluation (i.e. during test)')
 
@@ -83,6 +81,8 @@ dqn_parser.add_argument('--target-moving-average', type=float, required=False, d
         help='EMA parameter for target network')
 dqn_parser.add_argument('--vanilla-DQN', action='store_true', required=False,
         help='Use the vanilla dqn update instead of double DQN')
+dqn_parser.add_argument('--warmup-period', type=float_to_int, required=False, default=2000,
+        help='Number of steps to act randomly and not train')
 
 sac_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)
@@ -109,13 +109,24 @@ sac_parser.add_argument('--no-atari', action='store_true', required=False,
         help='Do not use atari preprocessing')
 sac_parser.add_argument('--ari', action='store_true', required=False,
         help='Whether to use annotated RAM')
+sac_parser.add_argument('--warmup-period', type=float_to_int, required=False, default=2000,
+        help='Number of steps to act randomly and not train')
 
 model_based_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)
-model_based_parser.add_argument('--iterations', type=int, default=100)
-model_based_parser.add_argument('--interactions-per-iter', type=int, default=4)
-model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=32)
-
+model_based_parser.add_argument('--iterations', type=int, default=10000)
+model_based_parser.add_argument('--interactions-per-iter', type=int, default=32)
+model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=0)
+model_based_parser.add_argument('--epsilon-decay-rate', type=float, default=0.999)
+model_based_parser.add_argument('--epsilon-final')
+model_based_parser.add_argument('--warmup-period', type=float_to_int, default=1000)
+model_based_parser.add_argument('--priority-threshold', type=float, default=0.05)
+model_based_parser.add_argument('--priority-decay', type=float, default=0.6)
+model_based_parser.add_argument('--max-rollout-length', type=int, required=False, default=None)
+model_based_parser.add_argument('--target-moving-average', type=float, default=0.01)
+model_based_parser.add_argument('--final-epsilon-value', type=float, required=False, default=0.05)
+model_based_parser.add_argument('--model-loss-threshold', type=float, default=0.01)
+model_based_parser.add_argument('--model-lr', type=float, default=0.001)
 ## DQN utils ##
 
 def init_weights(m):

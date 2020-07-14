@@ -29,20 +29,20 @@ class ModelNet(torch.nn.Module):
         self.optimizer = torch.optim.Adam(self.parameters(), lr=args.lr)
 
     def build_model(self):
-        input_size = self.state_space.shape[0] + 1
+        input_size = self.state_space.shape[0] + self.num_actions
         self.body = MLP([input_size] + self.layer_sizes,
                         activation=torch.nn.ReLU,
                         final_activation=torch.nn.ReLU
         )
         self.state_head = torch.nn.Linear(self.layer_sizes[-1], self.state_space.shape[0])
-        self.reward_head = torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1)
+        self.reward_head = torch.nn.Linear(self.state_space.shape[0] * 2 + self.num_actions, 1)
         # self.done_head = torch.nn.Sequential(
         #     torch.nn.Linear(self.state_space.shape[0] * 2 + 1, 1),
         #     torch.nn.Sigmoid(),
         # )
 
     def forward(self, state, action):
-        action = action.float()
+        action = one_hot(action.long().squeeze(), self.num_actions).float().to(self.device)
         output = self.body(torch.cat([state, action], dim=1))
         pred_state = self.state_head(output)
         sasp_input = torch.cat([state, pred_state, action], dim=1)
