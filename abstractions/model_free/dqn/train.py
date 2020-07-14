@@ -9,6 +9,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from ...common.utils import dqn_parser, append_timestamp, reset_seeds, initialize_environment
 from .model import DQN_agent
+from ...common.replay_buffer import Experience
 
 
 def test_policy(test_env, agent, episode, global_steps, writer, log_filename, args):
@@ -53,7 +54,7 @@ def episode_loop(env, test_env, agent, args, writer):
     episode = 0
     start = time.time()
     t_zero = time.time()
-                 
+
     end = time.time() + 1
 
     if args.load_checkpoint_path:
@@ -90,7 +91,8 @@ def episode_loop(env, test_env, agent, args, writer):
                 clipped_reward = reward
 
             # Store in replay buffer
-            agent.replay_buffer.append(state, action, clipped_reward, next_state, int(done))
+            experience = Experience(state, action, clipped_reward, next_state, int(done))
+            agent.replay_buffer.append(experience)
             state = next_state
 
             # Testing policy
@@ -129,7 +131,7 @@ reset_seeds(args.seed)
 env, test_env = initialize_environment(args)
 
 if type(env.action_space) != gym.spaces.Discrete:
-    raise NotImplementedError("DQN for continuous action_spaces hasn't been implemented") 
+    raise NotImplementedError("DQN for continuous action_spaces hasn't been implemented")
 
 # Check if GPU can be used and was asked for
 if args.gpu and torch.cuda.is_available():

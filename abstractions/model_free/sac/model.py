@@ -63,7 +63,6 @@ class SAC:
     def update_parameters(self, memory, batch_size, updates):
         # Sample a batch from memory
         minibatch = memory.sample(batch_size)
-        minibatch = Experience(*minibatch)
 
         state_batch = torch.as_tensor(minibatch.state.astype(np.float32)).to(self.device)
         next_state_batch = torch.as_tensor(minibatch.next_state.astype(np.float32)).to(self.device)

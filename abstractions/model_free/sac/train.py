@@ -8,7 +8,7 @@ import torch
 from torch.utils.tensorboard import SummaryWriter
 
 from .model import SAC
-from ...common.replay_buffer import ReplayBuffer
+from ...common.replay_buffer import ReplayBuffer, Experience
 from ...common.utils import sac_parser, initialize_environment, reset_seeds, append_timestamp
 
 
@@ -56,7 +56,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
     updates = 0
     start = time.time()
     t_zero = time.time()
-                 
+
     end = time.time() + 1
 
     score = 0
@@ -81,7 +81,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
                 action = env.action_space.sample()
             else:
                 action = agent.select_action(state)
-            
+
             if can_train:
                 for _ in range(args.updates_per_step):
                     # Update parameters of all the networks
@@ -95,7 +95,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
                         writer.add_scalar('loss/entropy_loss', ent_loss, updates)
                         writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                     updates += 1
-            
+
 
             next_state, reward, done, _ = env.step(action)
             score += reward
@@ -108,7 +108,8 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
             mask = 1 if steps == env._max_episode_steps else not done # pylint: disable=protected-access
 
             # Store in replay buffer
-            replay_buffer.append(state, action, clipped_reward, next_state, int(mask))
+            experience = Experience(state, action, clipped_reward, next_state, int(mask))
+            replay_buffer.append(experience)
             state = next_state
 
             # Testing policy

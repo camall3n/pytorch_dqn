@@ -282,7 +282,6 @@ class DQN_agent:
 
     def train_batch(self, batchsize, global_steps, writer, gradient_clip=None):
         minibatch = self.replay_buffer.sample(batchsize)
-        minibatch = Experience(*minibatch)
 
         self.optimizer.zero_grad()
 
