@@ -162,7 +162,7 @@ class DynaAgent:
             next_action = torch.argmax(self.critic(batch.next_state), dim=-1)
             next_q_values = self.critic_target(batch.next_state)
             boostrapped_value = next_q_values.gather(dim=1, index=next_action.long().unsqueeze(1)).squeeze(1)
-            discounted_value = (1 - batch.done) * self.gamma**n_steps * boostrapped_value
+            discounted_value = (1 - batch.done) * self.gamma**(1+n_steps) * boostrapped_value
             q_label = batch.reward + discounted_value
             td_error = q_label - q_acted
         loss = torch.nn.functional.smooth_l1_loss(input=q_acted, target=q_label)
