@@ -1,11 +1,13 @@
 from collections import namedtuple
 import math
 import resource
+import time
 
 import gym
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from abstractions.common.pqueue import PriorityQueue
 from abstractions.common.replay_buffer import ReplayBuffer, Experience
@@ -73,6 +75,7 @@ class DynaAgent:
 
         if len(self.replay) >= self.warmup_period:
             for _ in range(training_updates):
+                self.global_step += 1
                 batch = self._torchify_experience(self.replay.sample(self.batchsize))
                 td_errors = self.update_agent(batch)
                 loss = self.update_model(batch)
@@ -183,8 +186,7 @@ class DynaAgent:
             self.writer.add_histogram('dyna/q_acted', q_acted.detach(), self.global_step)
             self.writer.add_histogram('dyna/q_label', q_label, self.global_step)
             self.writer.add_histogram('dyna/td_error', td_error, self.global_step)
-        self.global_step += 1
-        if self.global_step >= self.warmup_period:
+        if len(self.replay) >= self.warmup_period:
             self.epsilon = max(self.epsilon*self.epsilon_decay_rate, self.final_epsilon_value)
         soft_update(self.critic_target, self.critic, tau=self.target_moving_average)
         return td_error.detach().cpu().numpy()
@@ -239,30 +241,38 @@ def train_agent(args):
     test_env = gym.make(args.env)
     agent = DynaAgent(env.observation_space, env.action_space, args.gamma, args)
 
+    start_time = time.time()
     state = env.reset()
     episode = 0
     ep_reward = 0
-    for _ in range(args.iterations):
-        experiences = []
-        for _ in range(args.interactions_per_iter):
-            action = agent.act(state)
-            next_state, reward, done, _ = env.step(action)
-            ep_reward += reward
-            experiences.append(Experience(state, action, reward, next_state, done))
-            state = next_state if not done else env.reset()
-            if done:
-                episode+=1
-                print(episode, ep_reward)
-                if agent.writer:
-                    agent.writer.add_scalar('dyna/episode', episode, agent.global_step)
-                    # agent.writer.add_scalar('dyna/train_episode_reward', ep_reward, agent.global_step)
-                ep_reward = 0
-        agent.train(experiences, training_updates=args.training_updates_per_iter)
-        agent.plan(steps=args.planning_steps_per_iter)
-        agent.test(test_env, args.episodes_per_eval)
-        if agent.writer:
-            memory_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1.0e9
-            agent.writer.add_scalar('system/memory_usage_gb', memory_usage, agent.global_step)
+    fps_steps = 0
+    with tqdm(total=args.iterations*args.interactions_per_iter) as pbar:
+        for _ in range(args.iterations):
+            experiences = []
+            for _ in range(args.interactions_per_iter):
+                action = agent.act(state)
+                next_state, reward, done, _ = env.step(action)
+                fps_steps += 1
+                ep_reward += reward
+                experiences.append(Experience(state, action, reward, next_state, done))
+                state = next_state if not done else env.reset()
+                if done:
+                    episode+=1
+                    end_time = time.time()
+                    fps = np.round(fps_steps / (end_time - start_time), decimals=1)
+                    pbar.set_description('ep={}, r={}, fps={}'.format(episode, ep_reward, fps))
+                    if agent.writer:
+                        agent.writer.add_scalar('dyna/episode', episode, agent.global_step)
+                        # agent.writer.add_scalar('dyna/train_episode_reward', ep_reward, agent.global_step)
+                    start_time = end_time
+                    ep_reward = 0
+                pbar.update(1)
+            agent.train(experiences, training_updates=args.training_updates_per_iter)
+            agent.plan(steps=args.planning_steps_per_iter)
+            agent.test(test_env, args.episodes_per_eval)
+            if agent.writer:
+                memory_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1.0e9
+                agent.writer.add_scalar('system/memory_usage_gb', memory_usage, agent.global_step)
 
 if __name__ == "__main__":
     args = model_based_parser.parse_args()
