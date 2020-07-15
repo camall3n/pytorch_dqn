@@ -114,12 +114,11 @@ sac_parser.add_argument('--warmup-period', type=float_to_int, required=False, de
 
 model_based_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)
-model_based_parser.add_argument('--iterations', type=int, default=10000)
+model_based_parser.add_argument('--iterations', type=int, default=40000)
 model_based_parser.add_argument('--interactions-per-iter', type=int, default=1)
-model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=0)
+model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=10)
 model_based_parser.add_argument('--training-updates-per-iter', type=int, default=1)
 model_based_parser.add_argument('--epsilon-decay-rate', type=float, default=0.999)
-model_based_parser.add_argument('--epsilon-final')
 model_based_parser.add_argument('--warmup-period', type=float_to_int, default=1000)
 model_based_parser.add_argument('--priority-threshold', type=float, default=0.05)
 model_based_parser.add_argument('--priority-decay', type=float, default=0.6)
@@ -128,6 +127,8 @@ model_based_parser.add_argument('--target-moving-average', type=float, default=0
 model_based_parser.add_argument('--final-epsilon-value', type=float, required=False, default=0.05)
 model_based_parser.add_argument('--model-loss-threshold', type=float, default=0.002)
 model_based_parser.add_argument('--model-lr', type=float, default=0.001)
+model_based_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000)
+
 ## DQN utils ##
 
 def init_weights(m):

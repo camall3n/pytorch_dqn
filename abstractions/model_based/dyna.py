@@ -247,12 +247,14 @@ def train_agent(args):
     episode = 0
     ep_reward = 0
     fps_steps = 0
+    interactions = 0
     with tqdm(total=args.iterations*args.interactions_per_iter) as pbar:
         for _ in range(args.iterations):
             experiences = []
             for _ in range(args.interactions_per_iter):
                 action = agent.act(state)
                 next_state, reward, done, _ = env.step(action)
+                interactions += 1
                 fps_steps += 1
                 ep_reward += reward
                 experiences.append(Experience(state, action, reward, next_state, done))
@@ -266,11 +268,13 @@ def train_agent(args):
                         agent.writer.add_scalar('dyna/episode', episode, agent.global_step)
                         # agent.writer.add_scalar('dyna/train_episode_reward', ep_reward, agent.global_step)
                     start_time = end_time
+                    fps_steps = 0
                     ep_reward = 0
                 pbar.update(1)
+                if interactions % args.test_policy_steps == 0:
+                    agent.test(test_env, args.episodes_per_eval)
             agent.train(experiences, training_updates=args.training_updates_per_iter)
             agent.plan(steps=args.planning_steps_per_iter)
-            agent.test(test_env, args.episodes_per_eval)
             if agent.writer:
                 memory_usage = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / 1.0e9
                 agent.writer.add_scalar('system/memory_usage_gb', memory_usage, agent.global_step)
