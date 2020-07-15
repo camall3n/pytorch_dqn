@@ -58,7 +58,7 @@ class DynaAgent:
         self.writer = None if args.no_tensorboard else SummaryWriter(comment=args.run_tag)
         self.global_step = 0
 
-    def act(self, state, eval=False):
+    def act(self, state, test=False):
         if np.random.uniform() < self.epsilon:
             action = self.action_space.sample()
         else:
@@ -67,6 +67,8 @@ class DynaAgent:
                 action = torch.argmax(self.critic(state).detach(), dim=-1).cpu().item()
         if self.writer:
             self.writer.add_scalar('dyna/epsilon', self.epsilon, self.global_step)
+        if not test:
+            self.global_step += 1
         return action
 
     def train(self, experiences, training_updates):
@@ -75,7 +77,6 @@ class DynaAgent:
 
         if len(self.replay) >= self.warmup_period:
             for _ in range(training_updates):
-                self.global_step += 1
                 batch = self._torchify_experience(self.replay.sample(self.batchsize))
                 td_errors = self.update_agent(batch)
                 loss = self.update_model(batch)
@@ -93,7 +94,7 @@ class DynaAgent:
                 state = test_env.reset()
                 done = False
                 while not done:
-                    action = self.act(state, eval=True)
+                    action = self.act(state, test=True)
                     next_state, reward, done, _ = test_env.step(action)
                     experiences.append(Experience(
                         state, action, reward, next_state, done

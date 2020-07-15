@@ -120,7 +120,7 @@ model_based_parser.add_argument('--planning-steps-per-iter', type=int, default=0
 model_based_parser.add_argument('--training-updates-per-iter', type=int, default=1)
 model_based_parser.add_argument('--epsilon-decay-rate', type=float, default=0.999)
 model_based_parser.add_argument('--epsilon-final')
-model_based_parser.add_argument('--warmup-period', type=float_to_int, default=100)
+model_based_parser.add_argument('--warmup-period', type=float_to_int, default=1000)
 model_based_parser.add_argument('--priority-threshold', type=float, default=0.05)
 model_based_parser.add_argument('--priority-decay', type=float, default=0.6)
 model_based_parser.add_argument('--max-rollout-length', type=int, required=False, default=1)
