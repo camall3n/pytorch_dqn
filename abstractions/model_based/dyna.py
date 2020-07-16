@@ -46,6 +46,7 @@ class DynaAgent:
         self.replay = ReplayBuffer(args.replay_buffer_size)
         self.priority_threshold = args.priority_threshold
         self.priority_decay = args.priority_decay
+        self.ignore_priority = args.ignore_priority
         self.max_rollout_length = args.max_rollout_length
         self.warmup_period = args.warmup_period
         self.batchsize = args.batchsize
@@ -149,6 +150,8 @@ class DynaAgent:
             if self.max_rollout_length is None or (n <= self.max_rollout_length):
                 for action in np.arange(self.action_space.n):
                     new_query = PlanningQuery(action, state, inner_return, final_state, done, n)
+                    if self.ignore_priority:
+                        priority = 1
                     self.queries.push(new_query, priority)
 
     def rollout(self, query_list):

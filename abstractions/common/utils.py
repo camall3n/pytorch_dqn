@@ -122,12 +122,14 @@ model_based_parser.add_argument('--epsilon-decay-rate', type=float, default=0.99
 model_based_parser.add_argument('--warmup-period', type=float_to_int, default=1000)
 model_based_parser.add_argument('--priority-threshold', type=float, default=0.05)
 model_based_parser.add_argument('--priority-decay', type=float, default=0.6)
+model_based_parser.add_argument('--ignore-priority', action='store_true', required=False)
 model_based_parser.add_argument('--max-rollout-length', type=int, required=False, default=1)
 model_based_parser.add_argument('--target-moving-average', type=float, default=0.01)
 model_based_parser.add_argument('--final-epsilon-value', type=float, required=False, default=0.05)
 model_based_parser.add_argument('--model-loss-threshold', type=float, default=0.0001)
 model_based_parser.add_argument('--model-lr', type=float, default=0.001)
 model_based_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000)
+
 
 ## DQN utils ##
 
