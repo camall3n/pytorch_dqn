@@ -116,28 +116,31 @@ class DynaAgent:
         for _ in range(steps*self.batchsize):
             if self.queries:
                 query_list.append(self.queries.pop_max())
-        if not query_list:
-            return
-        trajectories = self.rollout(query_list)
-        batch_start = 0
-        while True:
-            experience_batch = Experience(
-                trajectories.state[batch_start:batch_start+self.batchsize],
-                trajectories.action[batch_start:batch_start+self.batchsize],
-                trajectories.inner_return[batch_start:batch_start+self.batchsize],
-                trajectories.final_state[batch_start:batch_start+self.batchsize],
-                trajectories.done[batch_start:batch_start+self.batchsize],
-            )
-            n_steps = trajectories.n[batch_start:batch_start+self.batchsize]
-            batch_start += self.batchsize
-            if len(experience_batch.state) == 0:
-                break
-            td_errors = self.update_agent(experience_batch, n_steps)
-            cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), experience_batch))
-            experience_list = list(map(lambda x: Experience(*x), zip(*cpu_batch)))
-            rollout_lengths = trajectories.n.detach().cpu().numpy()
-            for experience, n, td_error in zip(experience_list, rollout_lengths, td_errors):
-                self.queue_rollouts(experience, n, td_error)
+        n_planning_steps = 0
+        if query_list:
+            trajectories = self.rollout(query_list)
+            batch_start = 0
+            while True:
+                experience_batch = Experience(
+                    trajectories.state[batch_start:batch_start+self.batchsize],
+                    trajectories.action[batch_start:batch_start+self.batchsize],
+                    trajectories.inner_return[batch_start:batch_start+self.batchsize],
+                    trajectories.final_state[batch_start:batch_start+self.batchsize],
+                    trajectories.done[batch_start:batch_start+self.batchsize],
+                )
+                n_steps = trajectories.n[batch_start:batch_start+self.batchsize]
+                batch_start += self.batchsize
+                if len(experience_batch.state) == 0:
+                    break
+                td_errors = self.update_agent(experience_batch, n_steps)
+                cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), experience_batch))
+                experience_list = list(map(lambda x: Experience(*x), zip(*cpu_batch)))
+                rollout_lengths = trajectories.n.detach().cpu().numpy()
+                for experience, n, td_error in zip(experience_list, rollout_lengths, td_errors):
+                    self.queue_rollouts(experience, n, td_error)
+                n_planning_steps += 1
+        if self.writer:
+            self.writer.add_scalar('dyna/planning_steps', n_planning_steps, self.global_step)
 
     def queue_rollouts(self, experience, n, td_error):
         state, _, inner_return, final_state, done = experience
