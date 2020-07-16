@@ -17,6 +17,7 @@ from .gym_wrappers import AtariPreprocess, MaxAndSkipEnv, FrameStack, ResetARI, 
 
 float_to_int = lambda x: int(float(x))
 
+# yapf: disable
 common_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 common_parser.add_argument('--env', type=str, required=True,
         help='The gym environment to train on')
@@ -30,7 +31,7 @@ common_parser.add_argument('--max-steps', type=float_to_int, required=False, def
         help='Number of steps to run for')
 common_parser.add_argument('--model-path', type=str, required=False,
         help='The path to the save the pytorch model')
-common_parser.add_argument('--output-path', type=str, required=False,
+common_parser.add_argument('--output-path', default='logs', type=str, required=False,
         help='The output directory to store training stats')
 common_parser.add_argument('--seed', type=int, required=False, default=10,
         help='The random seed for this run')
@@ -42,7 +43,7 @@ common_parser.add_argument('--render-episodes', type=int, required=False, defaul
         help='Render every these many episodes')
 common_parser.add_argument('--replay-buffer-size', type=float_to_int, required=False, default=50000,
         help='Max size of replay buffer')
-common_parser.add_argument('--lr', type=float, required=False, default=0.00003,
+common_parser.add_argument('--lr', type=float, required=False, default=3e-5,
         help='Learning rate for the optimizer')
 common_parser.add_argument('--batchsize', type=int, required=False, default=32,
         help='Number of experiences sampled from replay buffer')
@@ -62,6 +63,8 @@ dqn_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHe
         parents=[common_parser], add_help=False)
 dqn_parser.add_argument('--ari', action='store_true', required=False,
         help='Whether to use annotated RAM')
+dqn_parser.add_argument('--action-stack', action='store_true', required=False,
+        help='Whether to stack action as previous plane')
 dqn_parser.add_argument('--model-type', type=str, required=True, default='mlp',
         choices=['cnn', 'mlp'],
         help="Type of architecture")
@@ -97,7 +100,7 @@ sac_parser.add_argument('--automatic-entropy-tuning', action='store_true',
         help='Automaically adjust α (default: False)')
 sac_parser.add_argument('--hidden-size', type=int, default=256,
         help='hidden size (default: 256)')
-sac_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp'],
+sac_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp', 'cnn'],
         help="Type of architecture")
 sac_parser.add_argument('--updates-per-step', type=int, default=1,
         help='model updates per simulator step (default: 1)')
@@ -111,6 +114,33 @@ sac_parser.add_argument('--ari', action='store_true', required=False,
         help='Whether to use annotated RAM')
 sac_parser.add_argument('--warmup-period', type=float_to_int, required=False, default=2000,
         help='Number of steps to act randomly and not train')
+sac_parser.add_argument('--action-stack', action='store_true', required=False,
+        help='Whether to stack action as previous plane')
+
+ppo_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        parents=[common_parser], add_help=False)
+ppo_parser.add_argument('--discrete', action='store_true', required=False,
+        help='Discrete action space')
+ppo_parser.add_argument('--gradient-updates', type=float_to_int, default=80,
+        help='model updates per simulator step')
+ppo_parser.add_argument('--update-frequency', type=float_to_int, default=4e3,
+        help='number of steps between model updates')
+ppo_parser.add_argument('--action-std', type=float, default=0.5,
+        help='standard deviation for action (continuous only)')
+ppo_parser.add_argument('--eps-clip', type=float, default=0.2,
+        help='Eps clip parameter for PPO')
+ppo_parser.add_argument('--hidden-size', type=int, default=256,
+        help='hidden size (default: 256)')
+ppo_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp'],
+        help="Type of architecture")
+ppo_parser.add_argument('--no-atari', action='store_true', required=False,
+        help='Do not use atari preprocessing')
+ppo_parser.add_argument('--ari', action='store_true', required=False,
+        help='Whether to use annotated RAM')
+ppo_parser.add_argument('--action-stack', action='store_true', required=False,
+        help='Whether to stack action as previous plane')
+ppo_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
+        help='Policy is tested every these many steps')
 
 model_based_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)
@@ -129,14 +159,17 @@ model_based_parser.add_argument('--final-epsilon-value', type=float, required=Fa
 model_based_parser.add_argument('--model-loss-threshold', type=float, default=0.0001)
 model_based_parser.add_argument('--model-lr', type=float, default=0.001)
 model_based_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000)
+# yapf: enable
 
 
 ## DQN utils ##
+
 
 def init_weights(m):
     if type(m) == torch.nn.Linear:
         torch.nn.init.uniform_(m.weight, -0.1, 0.1)
         torch.nn.init.uniform_(m.bias, -1, 1)
+
 
 def conv2d_size_out(size, kernel_size, stride):
     ''' Adapted from pytorch tutorials:
@@ -145,9 +178,11 @@ def conv2d_size_out(size, kernel_size, stride):
     return ((size[0] - (kernel_size[0] - 1) - 1) // stride + 1,
             (size[1] - (kernel_size[1] - 1) - 1) // stride + 1)
 
+
 def deque_to_tensor(last_num_frames):
     """ Convert deque of n frames to tensor """
     return torch.cat(list(last_num_frames), dim=0)
+
 
 def plot_grad_flow(named_parameters):
     '''
@@ -190,6 +225,7 @@ def plot_grad_flow(named_parameters):
     ], ['max-gradient', 'mean-gradient', 'zero-gradient'])
     return plt.gcf()
 
+
 def reset_seeds(seed):
     # Setting cuda seeds
     if torch.cuda.is_available():
@@ -201,6 +237,7 @@ def reset_seeds(seed):
     random.seed(seed)
     np.random.seed(seed)
 
+
 def append_timestamp(string, fmt_string=None):
     now = datetime.now()
     if fmt_string:
@@ -208,13 +245,24 @@ def append_timestamp(string, fmt_string=None):
     else:
         return string + "_" + str(now).replace(" ", "_")
 
-def make_atari(env, num_frames):
+
+def make_atari(env, num_frames, action_stack=False):
     """ Wrap env in atari processed env """
-    return FrameStack(MaxAndSkipEnv(AtariPreprocess(env), 4), num_frames)
+    try:
+        noop_action = env.get_action_meanings().index("NOOP")
+    except ValueError:
+        print("Cannot find NOOP in env, defaulting to 0")
+        noop_action = 0
+    return FrameStack(MaxAndSkipEnv(AtariPreprocess(env), 4),
+                      num_frames,
+                      action_stack=action_stack,
+                      reset_action=noop_action)
+
 
 def make_ari(env):
     """ Wrap env in reset to match observation """
     return ResetARI(AtariARIWrapper(env))
+
 
 def make_visual(env, shape):
     """ Wrap env to return pixel observations """
@@ -224,9 +272,11 @@ def make_visual(env, shape):
     env = ResizeObservation(env, shape)
     return env
 
+
 def initialize_environment(args):
     # Initialize environment
     visual_cartpole_shape = (80, 120)
+    visual_pendulum_shape = (120, 120)
     if args.env == "VisualCartPole-v0":
         from pyvirtualdisplay import Display
         _ = Display(visible=False, backend='xvfb').start()
@@ -245,26 +295,43 @@ def initialize_environment(args):
         test_env.reset()
         env = make_visual(env, visual_cartpole_shape)
         test_env = make_visual(env, visual_cartpole_shape)
+    elif args.env == "VisualPendulum-v0":
+        from pyvirtualdisplay import Display
+        _ = Display(visible=False, backend='xvfb').start()
+        env = gym.make("Pendulum-v0")
+        test_env = gym.make("Pendulum-v0")
+        env.reset()
+        test_env.reset()
+        env = make_visual(env, visual_pendulum_shape)
+        test_env = make_visual(env, visual_pendulum_shape)
     elif args.env == "CartPole-PosAngle-v0":
-        env = IndexedObservation(gym.make("CartPole-v0"), [0,1])
-        test_env = IndexedObservation(gym.make("CartPole-v0"), [0,1])
+        env = IndexedObservation(gym.make("CartPole-v0"), [0, 1])
+        test_env = IndexedObservation(gym.make("CartPole-v0"), [0, 1])
     elif args.env == "CartPole-PosAngle-v1":
-        env = IndexedObservation(gym.make("CartPole-v1"), [0,1])
-        test_env = IndexedObservation(gym.make("CartPole-v1"), [0,1])
+        env = IndexedObservation(gym.make("CartPole-v1"), [0, 1])
+        test_env = IndexedObservation(gym.make("CartPole-v1"), [0, 1])
     else:
         env = gym.make(args.env)
         test_env = gym.make(args.env)
 
     if args.model_type == 'cnn':
         assert args.num_frames
+
+        if args.action_stack:
+            print("Stacking actions")
+            args.num_frames *= 2
+
         if not args.no_atari:
             print("Using atari preprocessing")
-            env = make_atari(env, args.num_frames)
-            test_env = make_atari(test_env, args.num_frames)
+            env = make_atari(env, args.num_frames, action_stack=args.action_stack)
+            test_env = make_atari(test_env, args.num_frames, action_stack=args.action_stack)
         else:
             print("FrameStacking with {}".format(args.num_frames))
-            env = FrameStack(env, args.num_frames)
-            test_env = FrameStack(test_env, args.num_frames)
+            env = FrameStack(env, args.num_frames, action_stack=args.action_stack, reset_action=0)
+            test_env = FrameStack(test_env,
+                                  args.num_frames,
+                                  action_stack=args.action_stack,
+                                  reset_action=0)
 
     if args.ari:
         print("Using ARI")
@@ -275,7 +342,9 @@ def initialize_environment(args):
     test_env.seed(args.seed + 1000)
     return env, test_env
 
+
 ## SAC utils ##
+
 
 def create_log_gaussian(mean, log_std, t):
     quadratic = -((0.5 * (t - mean) / (log_std.exp())).pow(2))
@@ -284,6 +353,7 @@ def create_log_gaussian(mean, log_std, t):
     z = l[-1] * math.log(2 * math.pi)
     log_p = quadratic.sum(dim=-1) - log_z.sum(dim=-1) - 0.5 * z
     return log_p
+
 
 def logsumexp(inputs, dim=None, keepdim=False):
     if dim is None:
@@ -295,13 +365,16 @@ def logsumexp(inputs, dim=None, keepdim=False):
         outputs = outputs.squeeze(dim)
     return outputs
 
+
 def soft_update(target, source, tau):
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(target_param.data * (1.0 - tau) + param.data * tau)
 
+
 def hard_update(target, source):
     for target_param, param in zip(target.parameters(), source.parameters()):
         target_param.data.copy_(param.data)
+
 
 def weights_init_(m):
     if isinstance(m, torch.nn.Linear):

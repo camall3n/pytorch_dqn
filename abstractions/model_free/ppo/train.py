@@ -1,4 +1,3 @@
-# Adapted from https://github.com/pranz24/pytorch-soft-actor-critic (2020)
 import time
 import os
 import json
@@ -7,9 +6,8 @@ import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
 
-from .model import SAC
-from ...common.replay_buffer import ReplayBuffer, Experience
-from ...common.utils import sac_parser, initialize_environment, reset_seeds
+from ...common.utils import ppo_parser, reset_seeds, initialize_environment
+from .model import PPO 
 
 
 def test_policy(test_env, agent, episode, global_steps, writer, log_filename, args):
@@ -25,7 +23,7 @@ def test_policy(test_env, agent, episode, global_steps, writer, log_filename, ar
 
             # Test episode loop
             while not test_done:
-                test_action = agent.act(test_state, evaluate=True)
+                test_action = agent.act(test_state, test=True)
 
                 # Take action in env
                 if render:
@@ -35,9 +33,9 @@ def test_policy(test_env, agent, episode, global_steps, writer, log_filename, ar
 
                 # Update reward
                 cumulative_reward += test_reward
-
+            agent.test_rollouts.clear_rollouts()
         eval_reward = cumulative_reward/args.episodes_per_eval
-
+        
         print("Policy_reward for test:", eval_reward)
 
         # Logging
@@ -48,15 +46,14 @@ def test_policy(test_env, agent, episode, global_steps, writer, log_filename, ar
                 f.write("{},{},{},".format(episode, global_steps, eval_reward))
 
 
-def episode_loop(env, test_env, agent, replay_buffer, args, writer):
+def episode_loop(env, test_env, agent, args, writer):
     # Episode loop
     global_steps = 0
     steps = 1
     episode = 0
-    updates = 0
     start = time.time()
     t_zero = time.time()
-
+                 
     end = time.time() + 1
 
     score = 0
@@ -71,30 +68,13 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
         state = env.reset()
         done = False
 
+        cumulative_loss = 0
         steps = 1
         score = 0
 
         # Collect data from the environment
         while not done:
-            if global_steps <= args.warmup_period:
-                action = env.action_space.sample()
-            else:
-                action = agent.act(state)
-            
-            if len(replay_buffer) >= args.batchsize and global_steps > args.warmup_period:
-                for _ in range(args.updates_per_step):
-                    # Update parameters of all the networks
-                    result = agent.update_parameters(replay_buffer, args.batchsize, updates)
-                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = result
-
-                    if writer:
-                        writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                        writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                        writer.add_scalar('loss/policy', policy_loss, updates)
-                        writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                        writer.add_scalar('entropy_temprature/alpha', alpha, updates)
-                    updates += 1
-
+            action = agent.act(state)
 
             next_state, reward, done, _ = env.step(action)
             score += reward
@@ -104,13 +84,9 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
             else:
                 clipped_reward = reward
 
-            # mask = 1 if steps == env._max_episode_steps else not done
-            # pylint: disable=protected-access
-            mask = not done
-
             # Store in replay buffer
-            experience = Experience(state, action, clipped_reward, next_state, int(mask))
-            replay_buffer.append(experience)
+            agent.rollouts.rewards.append(clipped_reward)
+            agent.rollouts.dones.append(done)
             state = next_state
 
             # Testing policy
@@ -122,12 +98,17 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
 
             global_steps += 1
 
-        end = time.time()
+            # Training loop
+            if global_steps % args.update_frequency == 0:
+                cumulative_loss += agent.update()
 
+        if not args.no_tensorboard:
+            writer.add_scalar('training/avg_episode_loss', cumulative_loss / steps, episode)
+
+        end = time.time()
         episode += 1
 
-
-args = sac_parser.parse_args()
+args = ppo_parser.parse_args()
 
 # Set seeds
 reset_seeds(args.seed)
@@ -142,7 +123,21 @@ else:
     device = torch.device('cpu')
 
 # Initialize model
-agent = SAC(env.observation_space.shape, env.action_space, device, args)
+agent_args = {
+    "device": device,
+    "state_space": env.observation_space,
+    "action_space": env.action_space,
+    "lr": args.lr,
+    "gamma": args.gamma,
+    "model_type": args.model_type,
+    "num_frames": args.num_frames,
+    "eps_clip": args.eps_clip,
+    "gradient_updates": args.gradient_updates,
+    "discrete": args.discrete,
+    "hidden_size": args.hidden_size,
+    "action_std": args.action_std,
+}
+agent = PPO(**agent_args)
 
 # Save path
 if args.model_path:
@@ -172,11 +167,7 @@ if not args.no_tensorboard:
 else:
     writer = None
 
-replay_buffer = ReplayBuffer(args.replay_buffer_size)
-episode_loop(env, test_env, agent, replay_buffer, args, writer)
+episode_loop(env, test_env, agent, args, writer)
 
 env.close()
 test_env.close()
-
-# if args.model_path:
-#     torch.save(agent.online, append_timestamp(os.path.join(args.model_path, args.run_tag)) + ".pth")
