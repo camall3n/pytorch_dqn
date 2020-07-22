@@ -4,6 +4,10 @@ from collections import namedtuple
 
 Experience = namedtuple('Experience', ['state', 'action', 'reward', 'next_state', 'done'])
 
+def batchify(experiences):
+    """Convert a list of experiences to a tuple of np.arrays"""
+    return tuple(map(np.asarray, list(zip(*experiences))))
+
 # Adapted from OpenAI Baselines:
 # https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py
 class ReplayBuffer(object):
@@ -30,20 +34,7 @@ class ReplayBuffer(object):
             self._storage[self._next_idx] = experience
         self._next_idx = (self._next_idx + 1) % self._maxsize
 
-    def _encode_sample(self, idxes):
-        obses_t, actions, rewards, obses_tp1, dones = [], [], [], [], []
-        for i in idxes:
-            data = self._storage[i]
-            obs_t, action, reward, obs_tp1, done = data
-            obses_t.append(np.array(obs_t, copy=False))
-            actions.append(np.array(action, copy=False))
-            rewards.append(reward)
-            obses_tp1.append(np.array(obs_tp1, copy=False))
-            dones.append(done)
-        experiences = Experience(*map(np.array, (obses_t, actions, rewards, obses_tp1, dones)))
-        return experiences
-
-    def sample(self, batch_size):
+    def sample(self, batch_size, wrap=True):
         """Sample a batch of experiences.
 
         Parameters
@@ -51,19 +42,19 @@ class ReplayBuffer(object):
         batch_size: int
             How many transitions to sample.
 
+        wrap: bool
+            Whether to wrap the batch in an Experience namedtuple
+
         Returns
         -------
-        obs_batch: np.array
-            batch of observations
-        act_batch: np.array
-            batch of actions executed given obs_batch
-        rew_batch: np.array
-            rewards received as results of executing act_batch
-        next_obs_batch: np.array
-            next set of observations seen after executing act_batch
-        done_mask: np.array
-            done_mask[i] = 1 if executing act_batch[i] resulted in
-            the end of an episode and 0 otherwise.
+        batch: (Experience or tuple)
+            If wrap==True, an Experience namedtuple whose elements are np.arrays,
+            otherwise, a primitive tuple whose elements are np.arrays
         """
         idxes = [random.randint(0, len(self._storage) - 1) for _ in range(batch_size)]
-        return self._encode_sample(idxes)
+        experiences = [self._storage[i] for i in idxes]
+        batch = batchify(experiences)
+        if wrap:
+            return Experience(*batch)
+        else:
+            return batch

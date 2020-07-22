@@ -10,24 +10,24 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from abstractions.common.pqueue import PriorityQueue
-from abstractions.common.replay_buffer import ReplayBuffer, Experience
+from abstractions.common.replay_buffer import ReplayBuffer, Experience, batchify
 from abstractions.common.utils import model_based_parser, soft_update, hard_update
 from abstractions.model_based.model import ModelNet
 from abstractions.model_free.dqn.model import DQN_MLP_model
 
 PlanningQuery = namedtuple('PlanningQuery',
     ('action', 'state', 'inner_return', 'final_state', 'done', 'n')
-) # To be rolled out (i.e. generate a prev_state that leads to 'state' via 'action')
+) # To be rolled out the (n+1)th time (i.e. generate a prev_state that leads to 'state' via 'action')
 
 Trajectory = namedtuple('Trajectory',
     ('state', 'action', 'inner_return', 'final_state', 'done', 'n')
-) # Fully rolled out (i.e. 'action' was selected in 'state')
+) # Fully rolled out n times (i.e. 'action' was selected in 'state')
 
 class DynaAgent:
     def __init__(self, state_space, action_space, gamma, args):
         self.state_space = state_space
         self.action_space = action_space
-        self.gamma = gamma
+        self.gamma = torch.as_tensor(gamma)
         self.epsilon = 1.0
         self.epsilon_decay_rate = args.epsilon_decay_rate
         self.final_epsilon_value = args.final_epsilon_value
@@ -73,37 +73,40 @@ class DynaAgent:
         return action
 
     def train(self, experiences, training_updates):
-        for experience in experiences:
-            self.replay.append(experience)
+        # convert each experience into an uniterated trajectory
+        trajectories = [Trajectory(*experience, 0) for experience in experiences]
+        for trajectory in trajectories:
+            self.replay.append(trajectory)
 
         if len(self.replay) >= self.warmup_period:
             for _ in range(training_updates):
-                batch = self._torchify_experience(self.replay.sample(self.batchsize))
+                batch = Trajectory(*self.replay.sample(self.batchsize, wrap=False))
+                batch = self._torchify(batch)
                 td_errors = self.update_agent(batch)
                 loss = self.update_model(batch)
                 if loss < self.model_loss_threshold:
-                    for experience, td_error in zip(experiences, td_errors):
-                        self.queue_rollouts(experience, 0, td_error)
+                    for trajectory, td_error in zip(trajectories, td_errors):
+                        self.queue_rollouts(trajectory, td_error)
         if self.writer:
             self.writer.add_scalar('dyna/queue_length', len(self.queries), self.global_step)
 
     def test(self, test_env, n_episodes):
         with torch.no_grad():
             total_reward = 0
-            experiences = []
+            trajectories = []
             for _ in range(n_episodes):
                 state = test_env.reset()
                 done = False
                 while not done:
                     action = self.act(state, test=True)
                     next_state, reward, done, _ = test_env.step(action)
-                    experiences.append(Experience(
-                        state, action, reward, next_state, done
+                    trajectories.append(Trajectory(
+                        state, action, reward, next_state, done, 0
                     ))
                     total_reward += reward
                     state = next_state
             avg_reward = total_reward / n_episodes
-            batch = self._torchify_experience(Experience(*list(zip(*experiences))))
+            batch = self._torchify(Trajectory(*batchify(trajectories)))
             model_loss, state_loss, reward_loss, abs_error = self._compute_model_loss(batch)
             if self.writer:
                 self.writer.add_scalar('evaluation/episode_reward', avg_reward, self.global_step)
@@ -122,29 +125,28 @@ class DynaAgent:
             trajectories = self.rollout(query_list)
             batch_start = 0
             while True:
-                experience_batch = Experience(
+                n_planning_steps += 1
+                traj_batch = Trajectory(
                     trajectories.state[batch_start:batch_start+self.batchsize],
                     trajectories.action[batch_start:batch_start+self.batchsize],
                     trajectories.inner_return[batch_start:batch_start+self.batchsize],
                     trajectories.final_state[batch_start:batch_start+self.batchsize],
                     trajectories.done[batch_start:batch_start+self.batchsize],
+                    trajectories.n[batch_start:batch_start+self.batchsize],
                 )
-                n_steps = trajectories.n[batch_start:batch_start+self.batchsize]
                 batch_start += self.batchsize
-                if len(experience_batch.state) == 0:
+                if len(traj_batch.state) == 0:
                     break
-                td_errors = self.update_agent(experience_batch, n_steps)
-                cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), experience_batch))
-                experience_list = list(map(lambda x: Experience(*x), zip(*cpu_batch)))
-                rollout_lengths = trajectories.n.detach().cpu().numpy()
-                for experience, n, td_error in zip(experience_list, rollout_lengths, td_errors):
-                    self.queue_rollouts(experience, n, td_error)
-                n_planning_steps += 1
+                td_errors = self.update_agent(traj_batch)
+                cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), traj_batch))
+                traj_list = list(map(lambda x: Trajectory(*x), zip(*cpu_batch)))
+                for trajectory, td_error in zip(traj_list, td_errors):
+                    self.queue_rollouts(trajectory, td_error)
         if self.writer:
             self.writer.add_scalar('dyna/planning_steps', n_planning_steps, self.global_step)
 
-    def queue_rollouts(self, experience, n, td_error):
-        state, _, inner_return, final_state, done = experience
+    def queue_rollouts(self, trajectory, td_error):
+        state, _, inner_return, final_state, done, n = trajectory
         priority = np.abs(td_error) * self.priority_decay**n
         if priority > self.priority_threshold:
             if self.max_rollout_length is None or (n <= self.max_rollout_length):
@@ -155,9 +157,10 @@ class DynaAgent:
                     self.queries.push(new_query, priority)
 
     def rollout(self, query_list):
-        batch = self._torchify_planning_query(PlanningQuery(*list(zip(*query_list))))
+        batch = self._torchify(PlanningQuery(*batchify(query_list)))
         new_state, new_reward = self.model(batch.state, batch.action)
-        new_return = new_reward.detach().squeeze(-1) + self.gamma * batch.inner_return
+        with torch.no_grad():
+            new_return = new_reward.squeeze(-1) + self.gamma * batch.inner_return
         trajectories = Trajectory(
             new_state.detach(),
             batch.action,
@@ -171,15 +174,15 @@ class DynaAgent:
             self.writer.add_scalar('dyna/mean_rollout_length', mean_rollout_length, self.global_step)
         return trajectories
 
-    def update_agent(self, batch, n_steps=0):
+    def update_agent(self, batch):
         q_predictions = self.critic(batch.state)
         q_acted = q_predictions.gather(dim=1, index=batch.action.long()).squeeze(1)
         with torch.no_grad():
-            next_action = torch.argmax(self.critic(batch.next_state), dim=-1)
-            next_q_values = self.critic_target(batch.next_state)
+            next_action = torch.argmax(self.critic(batch.final_state), dim=-1)
+            next_q_values = self.critic_target(batch.final_state)
             boostrapped_value = next_q_values.gather(dim=1, index=next_action.long().unsqueeze(1)).squeeze(1)
-            discounted_value = (1 - batch.done) * self.gamma**(1+n_steps) * boostrapped_value
-            q_label = batch.reward + discounted_value
+            discounted_value = (1 - batch.done) * self.gamma**(1+batch.n) * boostrapped_value
+            q_label = batch.inner_return + discounted_value
             td_error = q_label - q_acted
         loss = torch.nn.functional.smooth_l1_loss(input=q_acted, target=q_label)
         self.critic_optimizer.zero_grad()
@@ -199,7 +202,7 @@ class DynaAgent:
         return td_error.detach().cpu().numpy()
 
     def _compute_model_loss(self, batch):
-        state, action, reward, next_state, _ = batch
+        state, action, reward, next_state, _, _ = batch
         prev_state, prev_reward = self.model(next_state, action)
         state_loss = torch.nn.functional.smooth_l1_loss(input=prev_state, target=state)
         reward_loss = torch.nn.functional.smooth_l1_loss(input=prev_reward.squeeze(), target=reward)
@@ -220,27 +223,29 @@ class DynaAgent:
             self.writer.add_scalar('dyna/model_reward_loss', reward_loss.detach(), self.global_step)
         return loss.detach()
 
-    def _torchify_experience(self, batch):
-        batch = list(map(np.stack, batch))
-        states, actions, rewards, next_states, dones = batch
-        states = torch.from_numpy(states).float().to(self.device)
-        actions = torch.from_numpy(actions).long().to(self.device).unsqueeze(-1)
-        rewards = torch.from_numpy(rewards).float().to(self.device)
-        next_states = torch.from_numpy(next_states).float().to(self.device)
-        dones = torch.from_numpy(dones).byte().to(self.device)
-        batch = Experience(states, actions, rewards, next_states, dones)
-        return batch
-
-    def _torchify_planning_query(self, batch):
-        batch = list(map(np.stack, batch))
-        action, state, inner_return, final_state, done, n_steps = batch
-        action = torch.from_numpy(action).long().to(self.device).unsqueeze(-1)
-        state = torch.from_numpy(state).float().to(self.device)
-        inner_return = torch.from_numpy(inner_return).float().to(self.device)
-        final_state = torch.from_numpy(final_state).float().to(self.device)
-        done = torch.from_numpy(done).byte().to(self.device)
-        n_steps = torch.from_numpy(n_steps).long().to(self.device)
-        batch = PlanningQuery(action, state, inner_return, final_state, done, n_steps)
+    def _torchify(self, batch):
+        if isinstance(batch, Trajectory):
+            cls = Trajectory
+        elif isinstance(batch, PlanningQuery):
+            cls = PlanningQuery
+        elif isinstance(batch, Experience):
+            cls = Experience
+        batch = cls(*map(np.stack, batch))
+        batch = cls(*map(torch.from_numpy, batch))
+        # Convert to dictionary to update fields
+        batch = batch._asdict()
+        batch['state'] = batch['state'].float()
+        batch['action'] = batch['action'].long().unsqueeze(-1)
+        batch['done'] = batch['done'].byte()
+        if cls in [Trajectory, PlanningQuery]:
+            batch['inner_return'] = batch['inner_return'].float()
+            batch['final_state'] = batch['final_state'].float()
+            batch['n'] = batch['n'].long()
+        elif cls in [Experience]:
+            batch['reward'] = batch['reward'].float()
+        # Convert back to namedtuple
+        batch = cls(**batch)
+        batch = cls(*map(lambda x: x.to(self.device), batch))
         return batch
 
 def train_agent(args):
