@@ -45,11 +45,13 @@ common_parser.add_argument('--warmup-period', type=float_to_int, required=False,
         help='Number of steps to act randomly and not train')
 common_parser.add_argument('--episodes-per-eval', type=int, default=10,
         help='Number of episodes per evaluation (i.e. during test)')
+common_parser.add_argument('--no-atari', action='store_true', required=False,
+        help='Do not use atari preprocessing')
+common_parser.add_argument('--ari', action='store_true', required=False,
+        help='Whether to use annotated RAM')
 
 dqn_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)
-dqn_parser.add_argument('--ari', action='store_true', required=False,
-        help='Whether to use annotated RAM')
 dqn_parser.add_argument('--action-stack', action='store_true', required=False,
         help='Whether to stack action as previous plane')
 dqn_parser.add_argument('--model-type', type=str, required=True, default='mlp',
@@ -57,8 +59,6 @@ dqn_parser.add_argument('--model-type', type=str, required=True, default='mlp',
         help="Type of architecture")
 dqn_parser.add_argument('--load-checkpoint-path', type=str, required=False,
         help='Path to checkpoint')
-dqn_parser.add_argument('--no-atari', action='store_true', required=False,
-        help='Do not use atari preprocessing')
 dqn_parser.add_argument('--checkpoint-steps', type=float_to_int, required=False, default=20000,
         help='Checkpoint every so often')
 dqn_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
@@ -80,7 +80,7 @@ sac_parser.add_argument('--target-moving-average', type=float, required=False, d
         help='EMA parameter for target network')
 sac_parser.add_argument('--alpha', type=float, default=0.2,
         help='Temperature parameter α determines the relative importance of the entropy term \
-                against the reward (default: 0.2)'                                                                                                    )
+                against the reward (default: 0.2)')
 sac_parser.add_argument('--automatic-entropy-tuning', action='store_true',
         help='Automaically adjust α (default: False)')
 sac_parser.add_argument('--hidden-size', type=int, default=256,
@@ -93,10 +93,6 @@ sac_parser.add_argument('--target-update-interval', type=int, default=1,
         help='Value target update per no. of updates per step (default: 1)')
 sac_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
         help='Policy is tested every these many steps')
-sac_parser.add_argument('--no-atari', action='store_true', required=False,
-        help='Do not use atari preprocessing')
-sac_parser.add_argument('--ari', action='store_true', required=False,
-        help='Whether to use annotated RAM')
 sac_parser.add_argument('--action-stack', action='store_true', required=False,
         help='Whether to stack action as previous plane')
 
@@ -116,14 +112,25 @@ ppo_parser.add_argument('--hidden-size', type=int, default=256,
         help='hidden size (default: 256)')
 ppo_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp'],
         help="Type of architecture")
-ppo_parser.add_argument('--no-atari', action='store_true', required=False,
-        help='Do not use atari preprocessing')
-ppo_parser.add_argument('--ari', action='store_true', required=False,
-        help='Whether to use annotated RAM')
 ppo_parser.add_argument('--action-stack', action='store_true', required=False,
         help='Whether to stack action as previous plane')
 ppo_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
         help='Policy is tested every these many steps')
+
+sarsa_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        parents=[common_parser], add_help=False)
+sarsa_parser.add_argument('--lambda-value', type=float, required=False, default=0.7,
+        help='Lambda parameter')
+sarsa_parser.add_argument('--alpha', type=float, required=False, default=0.5,
+        help='Alpha parameter')
+sarsa_parser.add_argument('--feature-size', type=int, required=False, default=128,
+        help='Feature size')
+sarsa_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp'],
+        help="Type of architecture")
+sarsa_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
+        help='Policy is tested every these many steps')
+# sarsa_parser.add_argument('--feature-type', type=int, required=False, default=0.99,
+#         help='Feature size')
 
 model_based_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)

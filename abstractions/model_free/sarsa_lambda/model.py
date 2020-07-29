@@ -1,5 +1,6 @@
 import torch
 import random
+from gym.spaces import Discrete
 
 from ...common.modules import MLP
 
@@ -14,7 +15,8 @@ class SarsaAgent:
                  action_space,
                  feature_size):
         assert len(observation_space.shape) == 1, "Only supports single dimensional state spaces"
-        self.input_shape = observation_space.shape[0] + action_space.shape[0]
+        assert isinstance(action_space, Discrete), "Must be discrete actions"
+        self.input_shape = observation_space.shape[0] + 1
         self.action_space = action_space
         self.observation_space = observation_space
         self.feature_size = feature_size
@@ -27,25 +29,27 @@ class SarsaAgent:
         self.epsilon = 1
 
         self.phi = MLP([self.input_shape, feature_size])
-        self.weights = torch.rand(self.feature_size, dtype=torch.float32)
+        self.weights = torch.rand((self.feature_size, 1), dtype=torch.float32, device=self.device)
 
         self.reset_on_termination()
 
     def feature_function(self, state, action, done):
+        state = torch.Tensor(state, device=self.device)
+        action = torch.tensor(action, dtype=torch.float32, device=self.device).unsqueeze(0)
         if done:
-            return torch.zeros_like(self.feature_size).to(self.device)
+            return torch.zeros_like(self.weights, device=self.device)
         else:
             with torch.no_grad():
-                return self.phi(torch.cat([state, action]))
+                return self.phi(torch.cat([state, action]).unsqueeze(0)).transpose(0, 1)
 
     def compute_qval(self, state, action, done):
         features = self.feature_function(state, action, done)
-        return torch.matmul(self.weights.transpose(), features), features
+        return torch.matmul(self.weights.transpose(0, 1), features), features
 
     def update_eligibility(self, features_current):
         self.eligibility_trace *= self.gamma * self.lambda_value
         term3 = self.alpha * self.gamma * self.lambda_value * torch.matmul(
-                self.eligibility_trace.transpose(), features_current) * features_current
+                self.eligibility_trace.transpose(0, 1), features_current) * features_current
         self.eligibility_trace += features_current - term3
 
     def update_weights(self, td_error, features_current, q_current):
@@ -64,7 +68,7 @@ class SarsaAgent:
         return next_action
 
     def reset_on_termination(self):
-        self.eligibility_trace = torch.zeros(self.feature_size)
+        self.eligibility_trace = torch.zeros_like(self.weights, device=self.device)
         self.q_old = 0
 
     def argmax_over_actions(self, state, done):

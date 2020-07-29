@@ -7,7 +7,8 @@ import torch
 import gym
 from torch.utils.tensorboard import SummaryWriter
 
-from ...common.utils import dqn_parser, append_timestamp, reset_seeds, initialize_environment
+from ...common.utils import append_timestamp, reset_seeds, initialize_environment
+from ...common.parsers import sarsa_parser
 from .model import SarsaAgent
 
 
@@ -55,11 +56,6 @@ def episode_loop(env, test_env, agent, args, writer):
     t_zero = time.time()
 
     end = time.time() + 1
-
-    if args.load_checkpoint_path:
-        checkpoint = agent.load_checkpoint(args.load_checkpoint_path)
-        global_steps = checkpoint['global_steps']
-        episode = checkpoint['episode']
 
     score = 0
     while global_steps < args.max_steps:
@@ -120,7 +116,7 @@ def episode_loop(env, test_env, agent, args, writer):
         episode += 1
 
 
-args = dqn_parser.parse_args()
+args = sarsa_parser.parse_args()
 
 # Set seeds
 reset_seeds(args.seed)
