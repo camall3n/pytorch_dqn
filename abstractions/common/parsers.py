@@ -129,6 +129,10 @@ sarsa_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp
         help="Type of architecture")
 sarsa_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
         help='Policy is tested every these many steps')
+sarsa_parser.add_argument('--epsilon-decay-length', type=float_to_int, required=False, default=5000,
+        help='Number of steps to linearly decay epsilon')
+sarsa_parser.add_argument('--final-epsilon-value', type=float, required=False, default=0.05,
+        help='Final epsilon value, between 0 and 1')
 # sarsa_parser.add_argument('--feature-type', type=int, required=False, default=0.99,
 #         help='Feature size')
 

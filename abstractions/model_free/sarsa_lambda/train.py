@@ -49,6 +49,7 @@ def test_policy(test_env, agent, episode, global_steps, writer, log_filename, ar
 
 def episode_loop(env, test_env, agent, args, writer):
     # Episode loop
+    __import__('pdb').set_trace()
     global_steps = 0
     steps = 1
     episode = 0
@@ -104,7 +105,9 @@ def episode_loop(env, test_env, agent, args, writer):
                                               action,
                                               clipped_reward,
                                               done,
-                                              agent.epsilon)
+                                              agent.epsilon,
+                                              writer,
+                                              global_steps)
 
             state = next_state
 
@@ -113,6 +116,7 @@ def episode_loop(env, test_env, agent, args, writer):
 
         end = time.time()
 
+        agent.reset_on_termination()
         episode += 1
 
 
@@ -142,6 +146,9 @@ agent_args = {
     "gamma": args.gamma,
     "lambda_value": args.lambda_value,
     "feature_size": args.feature_size,
+    "warmup_period": args.warmup_period,
+    "epsilon_decay_length": args.epsilon_decay_length,
+    "final_epsilon_value": args.final_epsilon_value,
 }
 agent = SarsaAgent(**agent_args)
 
