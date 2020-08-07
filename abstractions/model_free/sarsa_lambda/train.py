@@ -49,7 +49,6 @@ def test_policy(test_env, agent, episode, global_steps, writer, log_filename, ar
 
 def episode_loop(env, test_env, agent, args, writer):
     # Episode loop
-    __import__('pdb').set_trace()
     global_steps = 0
     steps = 1
     episode = 0
@@ -118,6 +117,10 @@ def episode_loop(env, test_env, agent, args, writer):
 
         agent.reset_on_termination()
         episode += 1
+
+        # Logging
+        if not args.no_tensorboard and writer is not None:
+            writer.add_scalar('training/episode_reward', score, episode)
 
 
 args = sarsa_parser.parse_args()

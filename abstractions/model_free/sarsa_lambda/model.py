@@ -1,5 +1,6 @@
 import random
-from math import floor
+from math import floor, pi
+from itertools import permutations, combinations_with_replacement
 
 import torch
 from gym.spaces import Discrete
@@ -27,7 +28,6 @@ class SarsaAgent:
         self.observation_space = observation_space
         self.feature_size = feature_size
 
-
         self.gamma = gamma
         self.lambda_value = lambda_value
         self.alpha = alpha
@@ -36,11 +36,34 @@ class SarsaAgent:
         self.warmup_period = warmup_period
         self.epsilon_decay_length = epsilon_decay_length
         self.final_epsilon_value = final_epsilon_value
-        self.epsilon = 1
+        self.epsilon = 0.2
 
         # self.phi = MLP([self.input_shape, feature_size], final_activation=torch.nn.Sigmoid)
-        self.phi = self.binary_features
-        # self.weights = torch.rand((1, self.feature_size), dtype=torch.float32, device=self.device)
+        # self.phi = self.binary_features
+        # self.order = 8
+        # self.feature_size = (self.order + 1)**self.input_shape
+
+        # perms = [
+        #     permutations(tp)
+        #     for tp in combinations_with_replacement(range(0, self.order + 1), self.input_shape)
+        # ]
+
+        # self.coefficients = []
+
+        # for perm in perms:
+        #     self.coefficients += list(perm)
+
+        # self.coefficients = torch.as_tensor(list(set(self.coefficients)))
+
+        # self.alpha = self.alpha * torch.ones((1, self.feature_size))
+        # norms = torch.norm(self.coefficients.float(), dim=1, p=2, keepdim=False)
+        # norms[norms == 0.0] = 1
+        # self.alpha[0] /= norms
+
+        # self.alpha = self.alpha.repeat(1, self.action_space.n)
+
+        # self.phi = self.fourier_features
+        self.phi = lambda s: s
         self.weights = torch.zeros((1, self.feature_size * self.action_space.n),
                                    dtype=torch.float32,
                                    device=self.device)
@@ -53,18 +76,26 @@ class SarsaAgent:
         state = state.squeeze(0)
         interval = [0 for i in range(len(state))]
         buckets = [2, 2, 8, 4]
-        max_range = [2, 3, 0.42, 3] # [4.8,3.4*(10**38),0.42,3.4*(10**38)]
+        max_range = [2, 3, 0.42, 3]  # [4.8,3.4*(10**38),0.42,3.4*(10**38)]
 
         for i in range(len(state)):
             data = state[i]
-            inter = int(floor((data + max_range[i])/(2*max_range[i]/buckets[i])))
+            inter = int(floor((data + max_range[i]) / (2 * max_range[i] / buckets[i])))
             if inter >= buckets[i]:
-                interval[i] = buckets[i]-1
+                interval[i] = buckets[i] - 1
             elif inter < 0:
                 interval[i] = 0
             else:
                 interval[i] = inter
         return interval
+
+    def fourier_features(self, state):
+        # state /= 2 * (self.observation_space.high / (2**3) - self.observation_space.low / (2**3))
+        # state += 1
+        feature = torch.cos(pi * torch.bmm(
+            state.repeat(self.feature_size, 1).unsqueeze(1),
+            self.coefficients.float().unsqueeze(-1)).squeeze(-1)).transpose(0, 1)
+        return feature
 
     def feature_function(self, state, action, done):
         if done:
@@ -83,16 +114,23 @@ class SarsaAgent:
     def update_eligibility(self, features_current):
         term1 = self.gamma * self.lambda_value * self.eligibility_trace
         term3 = self.alpha * self.gamma * self.lambda_value * torch.matmul(
-                features_current, self.eligibility_trace.transpose(0, 1)) * features_current
-        self.eligibility_trace = term1 + features_current # - term3
+            features_current, self.eligibility_trace.transpose(0, 1)) * features_current
+        self.eligibility_trace = term1 + features_current - term3
 
     def update_weights(self, td_error, features_current, q_current):
         term1 = self.alpha * td_error * self.eligibility_trace
         term2 = self.alpha * (q_current - self.q_old) * features_current
-        self.weights += term1 # - term2- term2
+        self.weights += term1 - term2
 
-    def train_single_batch(self, state, next_state, action, reward, done, epsilon, writer,
-            writer_step):
+    def train_single_batch(self,
+                           state,
+                           next_state,
+                           action,
+                           reward,
+                           done,
+                           epsilon,
+                           writer,
+                           writer_step):
         q_current, features_current = self.compute_qval(state, action, False)
         next_action = self.act(next_state, done, epsilon)
         q_next, _ = self.compute_qval(next_state, next_action, done)
@@ -116,10 +154,12 @@ class SarsaAgent:
             #          for action in range(self.action_space.n)])
             # writer.add_histogram('training/q_values', qvals, writer_step)
 
-            writer.add_scalar('training/mean_eligibility_trace', self.eligibility_trace.mean(),
-                    writer_step)
-            writer.add_scalar('training/mean_features_current', features_current.mean(),
-                    writer_step)
+            writer.add_scalar('training/mean_eligibility_trace',
+                              self.eligibility_trace.mean(),
+                              writer_step)
+            writer.add_scalar('training/mean_features_current',
+                              features_current.mean(),
+                              writer_step)
             writer.add_scalar('training/mean_weights', self.weights.mean(), writer_step)
 
         return next_action
@@ -130,7 +170,7 @@ class SarsaAgent:
 
     def argmax_over_actions(self, state, done):
         action_qval_pairs = [(action, self.compute_qval(state, action, done)[0])
-                     for action in range(self.action_space.n)]
+                             for action in range(self.action_space.n)]
         return max(action_qval_pairs, key=lambda t: t[1])
 
     def act(self, state, done, epsilon):
@@ -144,7 +184,7 @@ class SarsaAgent:
 
     def set_epsilon(self, global_steps, writer):
         if global_steps < self.warmup_period:
-            self.epsilon = 1
+            self.epsilon = 0.2
         else:
             current_epsilon_decay = 1 - (1 - self.final_epsilon_value) * (
                 global_steps - self.warmup_period) / self.epsilon_decay_length
