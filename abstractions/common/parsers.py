@@ -14,6 +14,8 @@ common_parser.add_argument('--gpu', action='store_true', required=False,
         help='Use the gpu or not')
 common_parser.add_argument('--max-steps', type=float_to_int, required=False, default=40000,
         help='Number of steps to run for')
+common_parser.add_argument('--max-episodes', type=float_to_int, required=False, default=2000,
+        help='Number of episodes to run for')
 common_parser.add_argument('--model-path', type=str, required=False,
         help='The path to the save the pytorch model')
 common_parser.add_argument('--output-path', default='logs', type=str, required=False,
@@ -93,6 +95,8 @@ sac_parser.add_argument('--target-update-interval', type=int, default=1,
         help='Value target update per no. of updates per step (default: 1)')
 sac_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
         help='Policy is tested every these many steps')
+sac_parser.add_argument('--test-policy-episodes', type=float_to_int, required=False, default=10,
+        help='Policy is tested every these many episodes')
 sac_parser.add_argument('--no-atari', action='store_true', required=False,
         help='Do not use atari preprocessing')
 sac_parser.add_argument('--ari', action='store_true', required=False,

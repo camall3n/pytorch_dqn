@@ -61,7 +61,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
     end = time.time() + 1
 
     score = 0
-    while global_steps < args.max_steps:
+    while episode < args.max_episodes:
         info_str = "episode: {}, ".format(episode)
         info_str += "steps: {}, ".format(global_steps)
         info_str += "ep_score: {}, ".format(score)
@@ -82,20 +82,6 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
             else:
                 action = agent.act(state)
             
-            if len(replay_buffer) >= args.batchsize and global_steps > args.warmup_period:
-                for _ in range(args.updates_per_step):
-                    # Update parameters of all the networks
-                    result = agent.update_parameters(replay_buffer, args.batchsize, updates)
-                    critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = result
-
-                    if writer:
-                        writer.add_scalar('loss/critic_1', critic_1_loss, updates)
-                        writer.add_scalar('loss/critic_2', critic_2_loss, updates)
-                        writer.add_scalar('loss/policy', policy_loss, updates)
-                        writer.add_scalar('loss/entropy_loss', ent_loss, updates)
-                        writer.add_scalar('entropy_temprature/alpha', alpha, updates)
-                    updates += 1
-            
 
             next_state, reward, done, _ = env.step(action)
             score += reward
@@ -113,18 +99,32 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
             replay_buffer.append(state, action, clipped_reward, next_state, int(mask))
             state = next_state
 
-            # Testing policy
-            if global_steps % args.test_policy_steps == 0:
-                test_policy(test_env, agent, episode, global_steps, writer, log_filename, args)
-                if log_filename:
-                    with open(log_filename, "a") as f:
-                        f.write("{:.2f}\n".format(time.time() - t_zero))
-
             global_steps += 1
 
-        end = time.time()
-
         episode += 1
+
+        if len(replay_buffer) >= args.batchsize and global_steps > args.warmup_period:
+            for _ in range(args.updates_per_step):
+                # Update parameters of all the networks
+                result = agent.update_parameters(replay_buffer, args.batchsize, updates)
+                critic_1_loss, critic_2_loss, policy_loss, ent_loss, alpha = result
+
+                if writer:
+                    writer.add_scalar('loss/critic_1', critic_1_loss, updates)
+                    writer.add_scalar('loss/critic_2', critic_2_loss, updates)
+                    writer.add_scalar('loss/policy', policy_loss, updates)
+                    writer.add_scalar('loss/entropy_loss', ent_loss, updates)
+                    writer.add_scalar('entropy_temprature/alpha', alpha, updates)
+                updates += 1
+        
+        # Testing policy
+        if episode % args.test_policy_episodes == 0:
+            test_policy(test_env, agent, episode, global_steps, writer, log_filename, args)
+            if log_filename:
+                with open(log_filename, "a") as f:
+                    f.write("{:.2f}\n".format(time.time() - t_zero))
+
+        end = time.time()
 
 
 args = sac_parser.parse_args()

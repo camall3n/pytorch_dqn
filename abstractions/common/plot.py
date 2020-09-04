@@ -70,7 +70,7 @@ def plot(data, x, y, hue, style, col, seed, savepath=None, show=True):
                         col_wrap=col_wrap,
                         col_order=col_order,
                         palette=palette,
-                        facet_kws={'sharey': True})
+                        facet_kws={'sharey': False})
 
     elif seed == 'all':
         g = sns.relplot(x=x,
