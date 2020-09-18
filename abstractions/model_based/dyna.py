@@ -10,7 +10,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from abstractions.common.pqueue import PriorityQueue
-from abstractions.common.replay_buffer import ReplayBuffer, Experience, batchify
+from abstractions.common.replay_buffer import ReplayBuffer, Experience, batchify, unbatchify
 from abstractions.common.utils import model_based_parser, soft_update, hard_update
 from abstractions.model_based.model import ModelNet
 from abstractions.model_free.dqn.model import DQN_MLP_model
@@ -43,7 +43,8 @@ class DynaAgent:
 
         self.model = ModelNet(args, args.device, state_space, action_space).to(device=args.device)
         self.queries = PriorityQueue(maxlen=10000, mode='max')
-        self.replay = ReplayBuffer(args.replay_buffer_size)
+        self.replay_only = ReplayBuffer(args.replay_buffer_size)
+        self.replay_and_sim = ReplayBuffer(args.replay_buffer_size)
         self.priority_threshold = args.priority_threshold
         self.priority_decay = args.priority_decay
         self.ignore_priority = args.ignore_priority
@@ -76,19 +77,26 @@ class DynaAgent:
         # convert each experience into an uniterated trajectory
         trajectories = [Trajectory(*experience, 0) for experience in experiences]
         for trajectory in trajectories:
-            self.replay.append(trajectory)
+            self.replay_only.append(trajectory)
+            self.replay_and_sim.append(trajectory)
 
-        if len(self.replay) >= self.warmup_period:
+        if len(self.replay_only) >= self.warmup_period:
             for _ in range(training_updates):
-                batch = Trajectory(*self.replay.sample(self.batchsize, wrap=False))
-                batch = self._torchify(batch)
-                td_errors = self.update_agent(batch)
-                loss = self.update_model(batch)
+                agent_batch = self.get_batch(self.replay_and_sim)
+                td_errors = self.update_agent(agent_batch)
+                model_batch = self.get_batch(self.replay_only)
+                loss = self.update_model(model_batch)
                 if loss < self.model_loss_threshold:
-                    for trajectory, td_error in zip(trajectories, td_errors):
+                    agent_trajectories = unbatchify(self._untorchify(agent_batch), Trajectory)
+                    for trajectory, td_error in zip(agent_trajectories, td_errors):
                         self.queue_rollouts(trajectory, td_error)
         if self.writer:
             self.writer.add_scalar('dyna/queue_length', len(self.queries), self.global_step)
+
+    def get_batch(self, buffer):
+        batch = Trajectory(*buffer.sample(self.batchsize, wrap=False))
+        batch = self._torchify(batch)
+        return batch
 
     def test(self, test_env, n_episodes):
         with torch.no_grad():
@@ -116,6 +124,8 @@ class DynaAgent:
                 self.writer.add_scalar('evaluation/model_state_abs_err', abs_error.mean(), self.global_step)
 
     def plan(self, steps):
+        if len(self.replay_and_sim) < steps*self.batchsize:
+            return
         query_list = []
         for _ in range(steps*self.batchsize):
             if self.queries:
@@ -123,23 +133,12 @@ class DynaAgent:
         n_planning_steps = 0
         if query_list:
             trajectories = self.rollout(query_list)
-            batch_start = 0
-            while True:
-                n_planning_steps += 1
-                traj_batch = Trajectory(
-                    trajectories.state[batch_start:batch_start+self.batchsize],
-                    trajectories.action[batch_start:batch_start+self.batchsize],
-                    trajectories.inner_return[batch_start:batch_start+self.batchsize],
-                    trajectories.final_state[batch_start:batch_start+self.batchsize],
-                    trajectories.done[batch_start:batch_start+self.batchsize],
-                    trajectories.n[batch_start:batch_start+self.batchsize],
-                )
-                batch_start += self.batchsize
-                if len(traj_batch.state) == 0:
-                    break
-                td_errors = self.update_agent(traj_batch)
-                cpu_batch = list(map(lambda x: x.detach().cpu().numpy(), traj_batch))
-                traj_list = list(map(lambda x: Trajectory(*x), zip(*cpu_batch)))
+            for trajectory in unbatchify(self._untorchify(trajectories), Trajectory):
+                self.replay_and_sim.append(trajectory)
+            for n_planning_steps in range(steps):
+                batch = self.get_batch(self.replay_and_sim)
+                td_errors = self.update_agent(batch)
+                traj_list = unbatchify(self._untorchify(batch), Trajectory)
                 for trajectory, td_error in zip(traj_list, td_errors):
                     self.queue_rollouts(trajectory, td_error)
         if self.writer:
@@ -196,7 +195,7 @@ class DynaAgent:
             self.writer.add_histogram('dyna/q_acted', q_acted.detach(), self.global_step)
             self.writer.add_histogram('dyna/q_label', q_label, self.global_step)
             self.writer.add_histogram('dyna/td_error', td_error, self.global_step)
-        if len(self.replay) >= self.warmup_period:
+        if len(self.replay_only) >= self.warmup_period:
             self.epsilon = max(self.epsilon*self.epsilon_decay_rate, self.final_epsilon_value)
         soft_update(self.critic_target, self.critic, tau=self.target_moving_average)
         return td_error.detach().cpu().numpy()
@@ -230,6 +229,8 @@ class DynaAgent:
             cls = PlanningQuery
         elif isinstance(batch, Experience):
             cls = Experience
+        else:
+            raise TypeError('Invalid type {}'.format(type(batch)))
         batch = cls(*map(np.stack, batch))
         batch = cls(*map(torch.from_numpy, batch))
         # Convert to dictionary to update fields
@@ -246,6 +247,19 @@ class DynaAgent:
         # Convert back to namedtuple
         batch = cls(**batch)
         batch = cls(*map(lambda x: x.to(self.device), batch))
+        return batch
+
+    @staticmethod
+    def _untorchify(batch):
+        if isinstance(batch, Trajectory):
+            cls = Trajectory
+        elif isinstance(batch, PlanningQuery):
+            cls = PlanningQuery
+        elif isinstance(batch, Experience):
+            cls = Experience
+        else:
+            raise TypeError('Invalid type {}'.format(type(batch)))
+        batch = cls(*map(lambda x: x.detach().cpu().squeeze().numpy(), batch))
         return batch
 
 def train_agent(args):

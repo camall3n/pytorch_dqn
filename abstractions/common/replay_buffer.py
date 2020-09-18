@@ -8,6 +8,10 @@ def batchify(experiences):
     """Convert a list of experiences to a tuple of np.arrays"""
     return tuple(map(np.asarray, list(zip(*experiences))))
 
+def unbatchify(batch, cls):
+    """Convert a tuple of np.arrays to a list of cls objects"""
+    return list(map(lambda x: cls(*x), list(zip(*batch))))
+
 # Adapted from OpenAI Baselines:
 # https://github.com/openai/baselines/blob/master/baselines/deepq/replay_buffer.py
 class ReplayBuffer(object):
