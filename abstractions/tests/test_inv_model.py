@@ -1,13 +1,16 @@
 import numpy as np
 from scipy import stats
 import seaborn as sns
-from sys import platform as sys_pf
-import matplotlib
-matplotlib.use("macosx")
-import matplotlib.pyplot as plt
 import torch
-import gym
 from tqdm import tqdm
+# ---------------------------------------------------------------
+# This hack prevents a matplotlib/dm_control crash on macOS.
+# We open/close a plot before importing dm_control.suite, which
+# in this case happens when we import gym and make a dm2gym env.
+import matplotlib.pyplot as plt
+plt.plot(); plt.close()
+import gym
+# ---------------------------------------------------------------
 
 from ..common.modules import MarkovHead
 from ..common.utils import initialize_environment, reset_seeds
@@ -43,7 +46,7 @@ def main():
     z0 = torch.randn(1, n_features).expand(batch_size, n_features)
     z1 = torch.randn(1, n_features).expand(batch_size, n_features)
     losses = []
-    for t in tqdm(range(500)):
+    for _ in tqdm(range(500)):
         a = normal.sample((batch_size,)).squeeze(1)
         loss = markov_head.compute_markov_loss(z0, z1, a)
         optimizer.zero_grad()
@@ -54,7 +57,7 @@ def main():
 
     plt.plot(np.arange(len(losses)), np.asarray(losses))
     plt.savefig('test_inv_model_loss.png')
-    # plt.show()
+    plt.show()
 
     if n_action_dims == 1:
         plt.figure()
@@ -69,7 +72,7 @@ def main():
         plt.plot(x, p)
         plt.plot(x, q)
         plt.savefig('test_inv_model_dist.png')
-        # plt.show()
+        plt.show()
 
 
 if __name__ == "__main__":
