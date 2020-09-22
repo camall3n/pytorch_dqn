@@ -37,10 +37,19 @@ def main():
     batch_size = 1024
     n_features = env.observation_space.shape[0]
     n_action_dims = env.action_space.shape[0]
-    true_mu = 2.5 * torch.ones(n_action_dims).unsqueeze(0)
-    true_std = 0.5 * torch.ones(n_action_dims).unsqueeze(0)
-    true_cov = torch.diag_embed(true_std, dim1=1, dim2=2)
-    normal = torch.distributions.MultivariateNormal(loc=true_mu, covariance_matrix=true_cov)
+
+    def torch_isotropic_normal(loc, std):
+        """Build an isotropic torch.distributions.MultivariateNormal from loc and std vectors
+        """
+        loc = loc.unsqueeze(0)
+        std = std.unsqueeze(0)
+        cov = torch.diag_embed(std, dim1=1, dim2=2)
+        normal = torch.distributions.MultivariateNormal(loc=loc, covariance_matrix=cov)
+        return normal
+
+    true_mu = 2.5 * torch.ones(n_action_dims)
+    true_std = 0.5 * torch.ones(n_action_dims)
+    normal = torch_isotropic_normal(true_mu, true_std)
 
     markov_head = MarkovHead(args, n_features, n_action_dims)
     optimizer = torch.optim.Adam(markov_head.parameters())
@@ -70,8 +79,8 @@ def main():
         print('N({}, {})'.format(a_mu, a_std))
         x = np.linspace(-10,10,num=10000)
         dx = x[1]-x[0]
-        p = stats.norm(loc=true_mu, scale=true_std).pdf(x).squeeze()
-        q = stats.norm(loc=a_mu, scale=a_std).pdf(x).squeeze()
+        p = stats.norm(loc=true_mu, scale=true_std).pdf(x)
+        q = stats.norm(loc=a_mu, scale=a_std).pdf(x)
         plt.plot(x, p)
         plt.plot(x, q)
         plt.savefig('results/test_inv_model_dist.png')
