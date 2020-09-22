@@ -1,3 +1,5 @@
+import os
+
 import numpy as np
 from scipy import stats
 import seaborn as sns
@@ -56,7 +58,8 @@ def main():
         losses.append(x)
 
     plt.plot(np.arange(len(losses)), np.asarray(losses))
-    plt.savefig('test_inv_model_loss.png')
+    os.makedirs('results', exist_ok=True)
+    plt.savefig('results/test_inv_model_loss.png')
     plt.show()
 
     if n_action_dims == 1:
@@ -71,7 +74,7 @@ def main():
         q = stats.norm(loc=a_mu, scale=a_std).pdf(x).squeeze()
         plt.plot(x, p)
         plt.plot(x, q)
-        plt.savefig('test_inv_model_dist.png')
+        plt.savefig('results/test_inv_model_dist.png')
         plt.show()
 
 
