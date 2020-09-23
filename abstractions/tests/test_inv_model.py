@@ -39,7 +39,7 @@ def main():
     args.n_features = env.observation_space.shape[0]
     args.n_action_dims = env.action_space.shape[0]
     args.hidden_size = 512
-    args.n_updates = 2000
+    args.n_updates = 4000
 
     def torch_isotropic_normal(mu, std):
         """Build an isotropic torch.distributions.MultivariateNormal from mu and std vectors
@@ -76,6 +76,7 @@ def main():
     losses = []
     for _ in tqdm(range(args.n_updates)):
         z, a = get_batch(normals, z_list)
+        z = z + 0.05*torch.randn_like(z)
         loss = markov_head.compute_markov_loss(z, z, a)
         optimizer.zero_grad()
         loss.backward()
