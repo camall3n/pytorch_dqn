@@ -130,6 +130,8 @@ class InverseModel(torch.nn.Module):
         self.body = torch.nn.Sequential(
             torch.nn.Linear(feature_size * 2, args.hidden_size),
             torch.nn.ReLU(),
+            torch.nn.Linear(args.hidden_size, args.hidden_size),
+            torch.nn.ReLU(),
         )
         if self.discrete:
             self.log_pr_linear = torch.nn.Linear(args.hidden_size, num_actions)
