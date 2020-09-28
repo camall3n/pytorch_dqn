@@ -27,7 +27,7 @@ class SAC:
                                args.hidden_size,
                                args.model_type,
                                args.num_frames).to(device=self.device)
-        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=args.lr)
+        self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=args.lr, betas=(0.9, 0.999))
 
         self.critic_target = QNetwork(input_shape,
                                       action_space.shape[0],
@@ -42,7 +42,7 @@ class SAC:
                 self.target_entropy = -torch.prod(torch.Tensor(action_space.shape).to(
                     self.device)).item()
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
-                self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=args.lr)
+                self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr, betas=(0.5, 0.999))
 
             self.policy = GaussianPolicy(input_shape,
                                          action_space.shape[0],

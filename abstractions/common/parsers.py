@@ -26,11 +26,11 @@ common_parser.add_argument('--render', action='store_true', required=False,
         help='Render visual or not')
 common_parser.add_argument('--render-episodes', type=int, required=False, default=5,
         help='Render every these many episodes')
-common_parser.add_argument('--replay-buffer-size', type=float_to_int, required=False, default=50000,
+common_parser.add_argument('--replay-buffer-size', type=float_to_int, required=False, default=100000,
         help='Max size of replay buffer')
-common_parser.add_argument('--lr', type=float, required=False, default=3e-5,
+common_parser.add_argument('--lr', type=float, required=False, default=1e-3,
         help='Learning rate for the optimizer')
-common_parser.add_argument('--batchsize', type=int, required=False, default=32,
+common_parser.add_argument('--batchsize', type=int, required=False, default=128,
         help='Number of experiences sampled from replay buffer')
 common_parser.add_argument('--gradient-clip', type=float, required=False, default=0,
         help='How much to clip the gradients by, 0 is none')
@@ -39,9 +39,9 @@ common_parser.add_argument('--reward-clip', type=float, required=False, default=
 common_parser.add_argument('--model-shape', type=str, default='medium',
         choices=['tiny', 'small', 'medium', 'large', 'giant'],
         help="Shape of architecture (mlp only)")
-common_parser.add_argument('--num-frames', type=int, required=False, default=4,
+common_parser.add_argument('--num-frames', type=int, required=False, default=3,
         help='Number of frames to stack (CNN only)')
-common_parser.add_argument('--warmup-period', type=float_to_int, required=False, default=2000,
+common_parser.add_argument('--warmup-period', type=float_to_int, required=False, default=1000,
         help='Number of steps to act randomly and not train')
 common_parser.add_argument('--episodes-per-eval', type=int, default=10,
         help='Number of episodes per evaluation (i.e. during test)')
@@ -76,20 +76,22 @@ sac_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHe
         parents=[common_parser], add_help=False)
 sac_parser.add_argument('--policy', default="Gaussian", choices=["Gaussian", "Deterministic"],
         help='Policy Type')
-sac_parser.add_argument('--target-moving-average', type=float, required=False, default=0.005,
+sac_parser.add_argument('--target-moving-average', type=float, required=False, default=0.01,
         help='EMA parameter for target network')
-sac_parser.add_argument('--alpha', type=float, default=0.2,
+sac_parser.add_argument('--alpha', type=float, default=0.1,
         help='Temperature parameter α determines the relative importance of the entropy term \
-                against the reward (default: 0.2)'                                                                                                    )
+                against the reward')
+sac_parser.add_argument('--alpha-lr', type=float, default=1e-4,
+        help='Learning rate for temperature α')
 sac_parser.add_argument('--automatic-entropy-tuning', action='store_true',
         help='Automaically adjust α (default: False)')
-sac_parser.add_argument('--hidden-size', type=int, default=256,
+sac_parser.add_argument('--hidden-size', type=int, default=1024,
         help='hidden size (default: 256)')
 sac_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp', 'cnn'],
         help="Type of architecture")
 sac_parser.add_argument('--updates-per-step', type=int, default=1,
         help='model updates per simulator step (default: 1)')
-sac_parser.add_argument('--target-update-interval', type=int, default=1,
+sac_parser.add_argument('--target-update-interval', type=int, default=2,
         help='Value target update per no. of updates per step (default: 1)')
 sac_parser.add_argument('--test-policy-steps', type=float_to_int, required=False, default=1000,
         help='Policy is tested every these many steps')
