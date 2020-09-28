@@ -2,10 +2,14 @@
 import time
 import os
 import json
+import sys
 
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+
+if sys.platform == 'linux':
+    os.environ['MUJOCO_GL'] = 'osmesa'
 
 from .model import SMAC
 from ...common.replay_buffer import ReplayBuffer
