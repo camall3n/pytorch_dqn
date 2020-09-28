@@ -99,6 +99,13 @@ sac_parser.add_argument('--ari', action='store_true', required=False,
         help='Whether to use annotated RAM')
 sac_parser.add_argument('--action-stack', action='store_true', required=False,
         help='Whether to stack action as previous plane')
+sac_parser.add_argument('--detach-encoder', action='store_true',
+        help='Whether to stop gradients through encoder when training policy')
+
+smac_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
+        parents=[sac_parser], add_help=False)
+smac_parser.add_argument('--markov-loss-coef', type=float, default=1.0,
+        help='Coefficient for scaling Markov loss')
 
 ppo_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)

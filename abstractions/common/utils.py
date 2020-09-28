@@ -24,11 +24,11 @@ def init_weights(m):
 
 
 def conv2d_size_out(size, kernel_size, stride):
-    ''' Adapted from pytorch tutorials: 
-        https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html 
+    ''' Adapted from pytorch tutorials:
+        https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
     '''
-    return ((size[0] - (kernel_size[0] - 1) - 1) // stride + 1,
-            (size[1] - (kernel_size[1] - 1) - 1) // stride + 1)
+    return ((size[-2] - (kernel_size[-2] - 1) - 1) // stride + 1,
+            (size[-1] - (kernel_size[-1] - 1) - 1) // stride + 1)
 
 
 def deque_to_tensor(last_num_frames):
@@ -43,11 +43,11 @@ def plot_grad_flow(named_parameters):
 
     Plots the gradients flowing through different layers in the net during training.
     Can be used for checking for possible gradient vanishing / exploding problems.
-    
-    Usage: Plug this function in Trainer class after loss.backwards() as 
+
+    Usage: Plug this function in Trainer class after loss.backwards() as
     "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow
 
-    writer.add_figure('training/gradient_flow', plot_grad_flow(agent.online.named_parameters(), 
+    writer.add_figure('training/gradient_flow', plot_grad_flow(agent.online.named_parameters(),
         episode), global_step=episode)
 
     '''
@@ -159,7 +159,7 @@ def initialize_environment(args):
     elif args.env == "VisualAcrobot-v1":
         env, test_env = get_wrapped_env("Acrobot-v1", make_visual, shape=visual_pendulum_shape)
     elif args.env[:6] == 'Visual':
-        env, test_env = get_wrapped_env(args.env[6:], make_visual, shape=(64,64))
+        env, test_env = get_wrapped_env(args.env[6:], make_visual, shape=(64,64), fake_display=False)
     else:
         env = gym.make(args.env)
         test_env = gym.make(args.env)
