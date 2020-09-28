@@ -99,6 +99,8 @@ sac_parser.add_argument('--ari', action='store_true', required=False,
         help='Whether to use annotated RAM')
 sac_parser.add_argument('--action-stack', action='store_true', required=False,
         help='Whether to stack action as previous plane')
+sac_parser.add_argument('--action-repeat', type=int, default=None,
+        help='How many frames to repeat the action before showing the next observation')
 sac_parser.add_argument('--detach-encoder', action='store_true',
         help='Whether to stop gradients through encoder when training policy')
 

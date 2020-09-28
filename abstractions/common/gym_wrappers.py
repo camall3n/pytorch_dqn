@@ -165,20 +165,21 @@ class AtariPreprocess(gym.Wrapper):
 class MaxAndSkipEnv(gym.Wrapper):
     """
     Description:
-        Return only every `skip`-th frame. Repeat action, sum reward, and max over last 
-        observations.
-    
+        Return only every `skip`-th frame. Repeat action, sum reward, and
+        (by default) max over last observations.
+
     Usage:
         Wrap env and provide skip param.
 
     Notes:
         - N/A
     """
-    def __init__(self, env, skip=4):
+    def __init__(self, env, skip=4, max_pool=True):
         gym.Wrapper.__init__(self, env)
         # most recent raw observations (for max pooling across time steps)
         self._obs_buffer = np.zeros((2,) + env.observation_space.shape, dtype=np.uint8)
         self._skip = skip
+        self._max_pool = max_pool
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)
@@ -197,8 +198,11 @@ class MaxAndSkipEnv(gym.Wrapper):
                 break
         # Note that the observation on the done=True frame
         # doesn't matter
-        max_frame = self._obs_buffer.max(axis=0)
-        return max_frame, total_reward, done, info
+        if self._max_pool:
+            frame = self._obs_buffer.max(axis=0)
+        else:
+            frame = self._obs_buffer[1]
+        return frame, total_reward, done, info
 
 
 class FrameStack(gym.Wrapper):
