@@ -110,6 +110,9 @@ smac_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsH
         parents=[sac_parser], add_help=False)
 smac_parser.add_argument('--markov-loss-coef', type=float, default=1.0,
         help='Coefficient for scaling Markov loss')
+smac_parser.add_argument('--profile', action='store_true',
+        help='Whether to invoke the python cProfile module')
+smac_parser.add_argument('--profile-file', type=str, default='profile_stats')
 
 ppo_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)

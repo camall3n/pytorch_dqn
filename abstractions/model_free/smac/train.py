@@ -177,7 +177,14 @@ else:
     writer = None
 
 replay_buffer = ReplayBuffer(args.replay_buffer_size)
-episode_loop(env, test_env, agent, replay_buffer, args, writer)
+
+if args.profile:
+    import cProfile
+    os.makedirs('pstats', exist_ok=True)
+    pstats_file = os.path.join('pstats', args.profile_file)
+    cProfile.run('episode_loop(env, test_env, agent, replay_buffer, args, writer)', pstats_file)
+else:
+    episode_loop(env, test_env, agent, replay_buffer, args, writer)
 
 env.close()
 test_env.close()
