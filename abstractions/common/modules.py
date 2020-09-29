@@ -353,7 +353,7 @@ class QNetwork(torch.nn.Module):
             return rep1, rep2
 
     def forward(self, state, action, return_rep=False):
-        if self.model_type == 'cnn':
+        if self.model_type in ['cnn', 'curl']:
             rep1, rep2 = self.encode(state)
             x1 = self.q1(torch.cat([rep1, action], 1))
             x2 = self.q2(torch.cat([rep2, action], 1))
