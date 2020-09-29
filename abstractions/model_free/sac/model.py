@@ -3,13 +3,15 @@ import os
 import torch
 import numpy as np
 
-from ...common.modules import GaussianPolicy, QNetwork, DeterministicPolicy
+from ..markov.model import MarkovHead
+from ...common.modules import GaussianPolicy, QNetwork, DeterministicPolicy, build_phi_network
 from ...common.utils import hard_update, soft_update
 from ...common.replay_buffer import Experience
 
 
 class SAC:
     def __init__(self, input_shape, action_space, device, args):
+        self.enable_markov_loss = args.enable_markov_loss
 
         self.gamma = args.gamma
         self.tau = args.target_moving_average
@@ -22,19 +24,30 @@ class SAC:
 
         self.device = device
 
-        self.critic = QNetwork(input_shape,
+        if self.enable_markov_loss:
+            self.encoder, _ = build_phi_network(args, input_shape)
+        else:
+            self.encoder = None
+
+        self.critic = QNetwork(args, input_shape,
                                action_space.shape[0],
                                args.hidden_size,
                                args.model_type,
-                               args.num_frames).to(device=self.device)
+                               args.num_frames,
+                               encoder=self.encoder).to(device=self.device)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=args.lr, betas=(0.9, 0.999))
 
-        self.critic_target = QNetwork(input_shape,
+        self.critic_target = QNetwork(args, input_shape,
                                       action_space.shape[0],
                                       args.hidden_size,
                                       args.model_type,
-                                      args.num_frames).to(self.device)
+                                      args.num_frames,
+                                      encoder=self.encoder).to(self.device)
         hard_update(self.critic_target, self.critic)
+
+        if self.enable_markov_loss:
+            self.markov_head = MarkovHead(args, args.latent_dim, action_space.shape[0])
+            self.markov_loss_coef = args.markov_loss_coef
 
         if self.policy_type == "Gaussian":
             # Target Entropy = −dim(A) (e.g. , -6 for HalfCheetah-v2) as given in the paper
@@ -44,12 +57,14 @@ class SAC:
                 self.log_alpha = torch.zeros(1, requires_grad=True, device=self.device)
                 self.alpha_optim = torch.optim.Adam([self.log_alpha], lr=args.alpha_lr, betas=(0.5, 0.999))
 
-            self.policy = GaussianPolicy(input_shape,
+            self.policy = GaussianPolicy(args, input_shape,
                                          action_space.shape[0],
                                          args.hidden_size,
                                          args.model_type,
                                          args.num_frames,
-                                         action_space).to(self.device)
+                                         action_space,
+                                         encoder=self.encoder,
+                                         detach_encoder=args.detach_encoder).to(self.device)
             self.policy_optim = torch.optim.Adam(self.policy.parameters(), lr=args.lr)
 
         else:
@@ -93,7 +108,7 @@ class SAC:
             next_q_value = reward_batch + mask_batch * self.gamma * (min_qf_next_target)
 
         # Two Q-functions to mitigate positive bias in the policy improvement step
-        qf1, qf2 = self.critic(state_batch, action_batch)
+        qf1, qf2, rep, _ = self.critic(state_batch, action_batch, return_rep=True)
 
         # JQ = 𝔼(st,at)~D[0.5(Q1(st,at) - r(st,at) - γ(𝔼st+1~p[V(st+1)]))^2]
         qf1_loss = torch.nn.functional.mse_loss(qf1, next_q_value)
@@ -101,8 +116,15 @@ class SAC:
 
         qf_loss = qf1_loss + qf2_loss
 
+        if self.enable_markov_loss:
+            next_rep = self.encoder(next_state_batch)
+            markov_loss = self.markov_head.compute_markov_loss(rep, next_rep, action_batch)
+            combined_loss = qf_loss + self.markov_loss_coef * markov_loss
+        else:
+            combined_loss = qf_loss
+
         self.critic_optim.zero_grad()
-        qf_loss.backward()
+        combined_loss.backward()
         self.critic_optim.step()
 
         pi, log_pi, _ = self.policy.sample(state_batch)
@@ -140,10 +162,15 @@ class SAC:
         if not os.path.exists('models/'):
             os.makedirs('models/')
 
+        if self.enable_markov_loss:
+            alg = 'smac'
+        else:
+            alg = 'sac'
+
         if actor_path is None:
-            actor_path = "models/sac_actor_{}_{}".format(env_name, suffix)
+            actor_path = "models/{}_actor_{}_{}".format(alg, env_name, suffix)
         if critic_path is None:
-            critic_path = "models/sac_critic_{}_{}".format(env_name, suffix)
+            critic_path = "models/{}_critic_{}_{}".format(alg, env_name, suffix)
         print('Saving models to {} and {}'.format(actor_path, critic_path))
         torch.save(self.policy.state_dict(), actor_path)
         torch.save(self.critic.state_dict(), critic_path)

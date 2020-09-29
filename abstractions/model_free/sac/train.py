@@ -2,10 +2,14 @@
 import time
 import os
 import json
+import sys
 
 import numpy as np
 import torch
 from torch.utils.tensorboard import SummaryWriter
+
+if sys.platform == 'linux':
+    os.environ['MUJOCO_GL'] = 'osmesa'
 
 from .model import SAC
 from ...common.replay_buffer import ReplayBuffer
@@ -57,7 +61,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
     updates = 0
     start = time.time()
     t_zero = time.time()
-                 
+
     end = time.time() + 1
 
     score = 0
@@ -81,7 +85,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
                 action = env.action_space.sample()
             else:
                 action = agent.act(state)
-            
+
             if len(replay_buffer) >= args.batchsize and global_steps > args.warmup_period:
                 for _ in range(args.updates_per_step):
                     # Update parameters of all the networks
@@ -95,7 +99,7 @@ def episode_loop(env, test_env, agent, replay_buffer, args, writer):
                         writer.add_scalar('loss/entropy_loss', ent_loss, updates)
                         writer.add_scalar('entropy_temprature/alpha', alpha, updates)
                     updates += 1
-            
+
 
             next_state, reward, done, _ = env.step(action)
             score += reward
@@ -173,7 +177,14 @@ else:
     writer = None
 
 replay_buffer = ReplayBuffer(args.replay_buffer_size)
-episode_loop(env, test_env, agent, replay_buffer, args, writer)
+
+if args.profile:
+    import cProfile
+    os.makedirs('pstats', exist_ok=True)
+    pstats_file = os.path.join('pstats', args.profile_file)
+    cProfile.run('episode_loop(env, test_env, agent, replay_buffer, args, writer)', pstats_file)
+else:
+    episode_loop(env, test_env, agent, replay_buffer, args, writer)
 
 env.close()
 test_env.close()

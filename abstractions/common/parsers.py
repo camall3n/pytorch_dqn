@@ -87,7 +87,7 @@ sac_parser.add_argument('--automatic-entropy-tuning', action='store_true',
         help='Automaically adjust α (default: False)')
 sac_parser.add_argument('--hidden-size', type=int, default=1024,
         help='hidden size (default: 256)')
-sac_parser.add_argument('--model-type', type=str, default='mlp', choices=['mlp', 'cnn'],
+sac_parser.add_argument('--model-type', type=str, default='curl', choices=['mlp', 'cnn', 'curl'],
         help="Type of architecture")
 sac_parser.add_argument('--updates-per-step', type=int, default=1,
         help='model updates per simulator step (default: 1)')
@@ -103,16 +103,18 @@ sac_parser.add_argument('--action-stack', action='store_true', required=False,
         help='Whether to stack action as previous plane')
 sac_parser.add_argument('--action-repeat', type=int, default=None,
         help='How many frames to repeat the action before showing the next observation')
+sac_parser.add_argument('--latent-dim', type=int, default=50,
+        help='Number of variables in latent representation')
 sac_parser.add_argument('--detach-encoder', action='store_true',
         help='Whether to stop gradients through encoder when training policy')
-
-smac_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
-        parents=[sac_parser], add_help=False)
-smac_parser.add_argument('--markov-loss-coef', type=float, default=1.0,
-        help='Coefficient for scaling Markov loss')
-smac_parser.add_argument('--profile', action='store_true',
+sac_parser.add_argument('--enable-markov-loss', action='store_true',
+        help='Whether to enable Markov abstraction loss')
+sac_parser.add_argument('--markov-loss-coef', type=float, default=None,
+        help='Coefficient for scaling Markov loss (set to None to disable)')
+sac_parser.add_argument('--profile', action='store_true',
         help='Whether to invoke the python cProfile module')
-smac_parser.add_argument('--profile-file', type=str, default='profile_stats')
+sac_parser.add_argument('--profile-file', type=str, default='profile_stats')
+
 
 ppo_parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter,
         parents=[common_parser], add_help=False)

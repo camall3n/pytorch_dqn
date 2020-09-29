@@ -87,6 +87,29 @@ def build_phi_network(args, input_shape):
             torch.nn.ReLU(),
             Reshape(-1, output_size),
         ])
+    elif args.model_type == 'curl':
+        final_size = conv2d_size_out(input_shape, (3, 3), 2)
+        final_size = conv2d_size_out(final_size, (3, 3), 1)
+        final_size = conv2d_size_out(final_size, (3, 3), 1)
+        final_size = conv2d_size_out(final_size, (3, 3), 1)
+        output_size = final_size[0] * final_size[1] * 32
+        phi = torch.nn.Sequential(*[
+            torch.nn.Conv2d(args.num_frames, 32, kernel_size=(4, 4), stride=2),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
+            torch.nn.ReLU(),
+            Reshape(-1, output_size),
+            torch.nn.Linear(output_size, args.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(args.hidden_size, args.latent_dim),
+            torch.nn.LayerNorm(args.latent_dim),
+            torch.nn.Tanh()
+        ])
+        output_size = args.latent_dim
     elif args.model_type == 'mlp':
         if args.model_shape == 'small':
             layer_sizes = [(64, 64), (64, 64)]
@@ -260,7 +283,7 @@ class ValueNetwork(torch.nn.Module):
 
 
 class QNetwork(torch.nn.Module):
-    def __init__(self, input_shape, num_actions, hidden_dim, model_type, num_frames=None, encoder=None):
+    def __init__(self, args, input_shape, num_actions, hidden_dim, model_type, num_frames=None, encoder=None, output_size=None):
         super(QNetwork, self).__init__()
 
         if len(input_shape) > 2:
@@ -280,41 +303,39 @@ class QNetwork(torch.nn.Module):
                                           torch.nn.Linear(hidden_dim, hidden_dim),
                                           torch.nn.ReLU(),
                                           torch.nn.Linear(hidden_dim, 1))
-        elif model_type == 'cnn':
+        elif model_type in ['cnn', 'curl']:
             assert num_frames is not None, "Must provide num frames"
-
-            final_size = conv2d_size_out(input_shape, (8, 8), 4)
-            final_size = conv2d_size_out(final_size, (4, 4), 2)
-            final_size = conv2d_size_out(final_size, (3, 3), 1)
-            output_size = final_size[0] * final_size[1] * 64
 
             if encoder is not None:
                 self.body1 = encoder
                 self.body2 = self.body1
+                output_size = output_size
             else:
-                self.body1 = torch.nn.Sequential(
-                    torch.nn.Conv2d(num_frames, 32, kernel_size=(8, 8), stride=4),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(32, 64, kernel_size=(4, 4), stride=2),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(64, 64, kernel_size=(3, 3), stride=1),
-                    torch.nn.ReLU(),
-                    Reshape(-1, output_size))
-                self.body2 = torch.nn.Sequential(
-                    torch.nn.Conv2d(num_frames, 32, kernel_size=(8, 8), stride=4),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(32, 64, kernel_size=(4, 4), stride=2),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(64, 64, kernel_size=(3, 3), stride=1),
-                    torch.nn.ReLU(),
-                    Reshape(-1, output_size))
+                self.body1, output_size = build_phi_network(args, input_shape)
+                self.body2, _ = build_phi_network(args, input_shape)
 
+        if model_type == 'cnn':
             self.q1 = torch.nn.Sequential(torch.nn.Linear(output_size + num_actions, hidden_dim),
                                           torch.nn.ReLU(),
                                           torch.nn.Linear(hidden_dim, 1))
             self.q2 = torch.nn.Sequential(torch.nn.Linear(output_size + num_actions, hidden_dim),
                                           torch.nn.ReLU(),
                                           torch.nn.Linear(hidden_dim, 1))
+        elif model_type == 'curl':
+            self.q1 = torch.nn.Sequential(
+                torch.nn.Linear(output_size + num_actions, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, 1)
+            )
+            self.q2 = torch.nn.Sequential(
+                torch.nn.Linear(output_size + num_actions, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, 1)
+            )
 
         self.apply(weights_init_)
 
@@ -348,6 +369,7 @@ class QNetwork(torch.nn.Module):
 
 class GaussianPolicy(torch.nn.Module):
     def __init__(self,
+                 args,
                  input_shape,
                  num_actions,
                  hidden_dim,
@@ -355,6 +377,7 @@ class GaussianPolicy(torch.nn.Module):
                  num_frames=None,
                  action_space=None,
                  encoder=None,
+                 output_size=None,
                  detach_encoder=False):
         super(GaussianPolicy, self).__init__()
 
@@ -368,26 +391,14 @@ class GaussianPolicy(torch.nn.Module):
                                             torch.nn.Linear(hidden_dim, hidden_dim),
                                             torch.nn.ReLU())
 
-        elif model_type == 'cnn':
+        elif model_type in ['cnn', 'curl']:
             assert num_frames is not None, "Must provide num frames"
-
-            final_size = conv2d_size_out(input_shape, (8, 8), 4)
-            final_size = conv2d_size_out(final_size, (4, 4), 2)
-            final_size = conv2d_size_out(final_size, (3, 3), 1)
-            output_size = final_size[0] * final_size[1] * 64
 
             if encoder is not None:
                 self.encoder = encoder
+                output_size = output_size
             else:
-                self.encoder = torch.nn.Sequential(
-                    torch.nn.Conv2d(num_frames, 32, kernel_size=(8, 8), stride=4),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(32, 64, kernel_size=(4, 4), stride=2),
-                    torch.nn.ReLU(),
-                    torch.nn.Conv2d(64, 64, kernel_size=(3, 3), stride=1),
-                    torch.nn.ReLU(),
-                    Reshape(-1, output_size)
-                )
+                self.encoder, output_size = build_phi_network(args, input_shape)
             self.detach_encoder = detach_encoder
             self.body = torch.nn.Sequential(
                 torch.nn.Linear(output_size, hidden_dim),
