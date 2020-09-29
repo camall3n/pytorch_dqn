@@ -22,7 +22,7 @@ args = sac_parser.parse_args(args=[
 
 env, _ = initialize_environment(args)
 env.reset()
-trials = 10000
+trials = 1000
 s = time.time()
 for i in tqdm(range(trials)):
     _, _, done, _ = env.step(env.action_space.sample())
@@ -30,4 +30,4 @@ for i in tqdm(range(trials)):
         env.reset()
 e = time.time()
 
-print("Speed: {}".format(trials / (s - e)))
+print("Speed: {}".format(trials / (e - s)), 'iterations per second')
