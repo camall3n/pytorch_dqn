@@ -109,8 +109,8 @@ sac_parser.add_argument('--detach-encoder', action='store_true',
         help='Whether to stop gradients through encoder when training policy')
 sac_parser.add_argument('--enable-markov-loss', action='store_true',
         help='Whether to enable Markov abstraction loss')
-sac_parser.add_argument('--markov-loss-coef', type=float, default=None,
-        help='Coefficient for scaling Markov loss (set to None to disable)')
+sac_parser.add_argument('--markov-loss-coef', type=float, default=1.0,
+        help='Coefficient for scaling Markov loss')
 sac_parser.add_argument('--profile', action='store_true',
         help='Whether to invoke the python cProfile module')
 sac_parser.add_argument('--profile-file', type=str, default='profile_stats')

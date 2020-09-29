@@ -124,10 +124,12 @@ def make_visual(env, shape):
     env = ResizeObservation(env, shape)
     return env
 
-def make_visual_dm2gym(env, shape=(84,84), skip=None):
+def make_visual_dm2gym(env, shape=(84,84), stack=1, skip=None):
     env = make_visual(env, shape)
     if skip is not None:
         env = MaxAndSkipEnv(env, skip=skip, max_pool=False)
+    if stack > 1:
+        env = FrameStack(env, k=stack)
     return env
 
 def get_wrapped_env(env_string, wrapper_func, fake_display=True, **kwargs):
@@ -169,6 +171,7 @@ def initialize_environment(args):
                             make_visual_dm2gym,
                             fake_display=False,
                             shape=(84,84),
+                            stack=args.num_frames,
                             skip=args.action_repeat,
                         )
     elif args.env[:6] == 'Visual':

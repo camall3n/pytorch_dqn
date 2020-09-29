@@ -25,16 +25,17 @@ class SAC:
         self.device = device
 
         if self.enable_markov_loss:
-            self.encoder, _ = build_phi_network(args, input_shape)
+            self.encoder, output_size = build_phi_network(args, input_shape)
         else:
-            self.encoder = None
+            self.encoder, output_size = None, None
 
         self.critic = QNetwork(args, input_shape,
                                action_space.shape[0],
                                args.hidden_size,
                                args.model_type,
                                args.num_frames,
-                               encoder=self.encoder).to(device=self.device)
+                               encoder=self.encoder,
+                               output_size=output_size).to(device=self.device)
         self.critic_optim = torch.optim.Adam(self.critic.parameters(), lr=args.lr, betas=(0.9, 0.999))
 
         self.critic_target = QNetwork(args, input_shape,
@@ -42,7 +43,8 @@ class SAC:
                                       args.hidden_size,
                                       args.model_type,
                                       args.num_frames,
-                                      encoder=self.encoder).to(self.device)
+                                      encoder=self.encoder,
+                                      output_size=output_size).to(self.device)
         hard_update(self.critic_target, self.critic)
 
         if self.enable_markov_loss:
@@ -64,6 +66,7 @@ class SAC:
                                          args.num_frames,
                                          action_space,
                                          encoder=self.encoder,
+                                         output_size=output_size,
                                          detach_encoder=args.detach_encoder).to(self.device)
             self.policy_optim = torch.optim.Adam(self.policy.parameters(), lr=args.lr)
 
