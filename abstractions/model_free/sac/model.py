@@ -48,7 +48,7 @@ class SAC:
         hard_update(self.critic_target, self.critic)
 
         if self.enable_markov_loss:
-            self.markov_head = MarkovHead(args, args.latent_dim, action_space.shape[0])
+            self.markov_head = MarkovHead(args, args.latent_dim, action_space.shape[0]).to(self.device)
             self.markov_loss_coef = args.markov_loss_coef
 
         if self.policy_type == "Gaussian":
