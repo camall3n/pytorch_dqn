@@ -124,11 +124,12 @@ def make_visual(env, shape):
     env = ResizeObservation(env, shape)
     return env
 
-def make_visual_dm2gym(env, shape=(84,84), stack=1, skip=None):
+def make_dm2gym(env, shape=(84,84), stack=1, skip=None, visual=True):
     env = ObservationDictToInfo(env, "observations")
     if skip is not None:
         env = MaxAndSkipEnv(env, skip=skip, max_pool=False)
-    env = make_visual(env, shape)
+    if visual:
+        env = make_visual(env, shape)
     if stack > 1:
         env = FrameStack(env, k=stack)
     return env
@@ -169,14 +170,15 @@ def initialize_environment(args):
         env, test_env = get_wrapped_env("MountainCar-v0", make_visual, shape=visual_cartpole_shape)
     elif args.env == "VisualAcrobot-v1":
         env, test_env = get_wrapped_env("Acrobot-v1", make_visual, shape=visual_pendulum_shape)
-    elif 'Visualdm2gym' in args.env:
+    elif 'dm2gym' in args.env:
         env, test_env = get_wrapped_env(
-                            args.env[6:],
-                            make_visual_dm2gym,
+                            args.env[6:] if 'Visual' in args.env else args.env,
+                            make_dm2gym,
                             fake_display=False,
-                            shape=(84,84),
+                            shape=(84,84),# only used in visual mode
                             stack=args.num_frames,
                             skip=args.action_repeat,
+                            visual=('Visual' in args.env),
                         )
     elif args.env[:6] == 'Visual':
         env, test_env = get_wrapped_env(args.env[6:], make_visual, shape=(64,64))
