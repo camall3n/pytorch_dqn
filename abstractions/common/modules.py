@@ -103,9 +103,7 @@ def build_phi_network(args, input_shape):
             torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
             torch.nn.ReLU(),
             Reshape(-1, output_size),
-            torch.nn.Linear(output_size, args.hidden_size),
-            torch.nn.ReLU(),
-            torch.nn.Linear(args.hidden_size, args.latent_dim),
+            torch.nn.Linear(output_size, args.latent_dim),
             torch.nn.LayerNorm(args.latent_dim),
             torch.nn.Tanh()
         ])
