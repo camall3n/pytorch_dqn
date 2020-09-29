@@ -180,6 +180,7 @@ class MaxAndSkipEnv(gym.Wrapper):
         self._obs_buffer = np.zeros((2,) + env.observation_space.shape, dtype=np.uint8)
         self._skip = skip
         self._max_pool = max_pool
+        self.observation_space = env.observation_space
 
     def reset(self, **kwargs):
         return self.env.reset(**kwargs)

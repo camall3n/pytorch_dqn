@@ -125,9 +125,10 @@ def make_visual(env, shape):
     return env
 
 def make_visual_dm2gym(env, shape=(84,84), stack=1, skip=None):
-    env = make_visual(env, shape)
+    env = ObservationDictToInfo(env, "observations")
     if skip is not None:
         env = MaxAndSkipEnv(env, skip=skip, max_pool=False)
+    env = make_visual(env, shape)
     if stack > 1:
         env = FrameStack(env, k=stack)
     return env
@@ -136,8 +137,11 @@ def get_wrapped_env(env_string, wrapper_func, fake_display=True, **kwargs):
     if fake_display:
         from pyvirtualdisplay import Display
         _ = Display(visible=False, backend='xvfb').start()
-    env = gym.make(env_string)
-    test_env = gym.make(env_string)
+    env_kwargs = dict()
+    if 'dm2gym' in env_string:
+        env_kwargs['flat_observation'] = True
+    env = gym.make(env_string, environment_kwargs=env_kwargs)
+    test_env = gym.make(env_string, environment_kwargs=env_kwargs)
     env.reset()
     test_env.reset()
     env = wrapper_func(env, **kwargs)
