@@ -24,11 +24,11 @@ def init_weights(m):
 
 
 def conv2d_size_out(size, kernel_size, stride):
-    ''' Adapted from pytorch tutorials: 
-        https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html 
+    ''' Adapted from pytorch tutorials:
+        https://pytorch.org/tutorials/intermediate/reinforcement_q_learning.html
     '''
-    return ((size[0] - (kernel_size[0] - 1) - 1) // stride + 1,
-            (size[1] - (kernel_size[1] - 1) - 1) // stride + 1)
+    return ((size[-2] - (kernel_size[-2] - 1) - 1) // stride + 1,
+            (size[-1] - (kernel_size[-1] - 1) - 1) // stride + 1)
 
 
 def deque_to_tensor(last_num_frames):
@@ -43,11 +43,11 @@ def plot_grad_flow(named_parameters):
 
     Plots the gradients flowing through different layers in the net during training.
     Can be used for checking for possible gradient vanishing / exploding problems.
-    
-    Usage: Plug this function in Trainer class after loss.backwards() as 
+
+    Usage: Plug this function in Trainer class after loss.backwards() as
     "plot_grad_flow(self.model.named_parameters())" to visualize the gradient flow
 
-    writer.add_figure('training/gradient_flow', plot_grad_flow(agent.online.named_parameters(), 
+    writer.add_figure('training/gradient_flow', plot_grad_flow(agent.online.named_parameters(),
         episode), global_step=episode)
 
     '''
@@ -124,13 +124,25 @@ def make_visual(env, shape):
     env = ResizeObservation(env, shape)
     return env
 
+def make_dm2gym(env, shape=(84,84), stack=1, skip=None, visual=True):
+    env = ObservationDictToInfo(env, "observations")
+    if skip is not None:
+        env = MaxAndSkipEnv(env, skip=skip, max_pool=False)
+    if visual:
+        env = make_visual(env, shape)
+    if stack > 1:
+        env = FrameStack(env, k=stack)
+    return env
 
 def get_wrapped_env(env_string, wrapper_func, fake_display=True, **kwargs):
     if fake_display:
         from pyvirtualdisplay import Display
         _ = Display(visible=False, backend='xvfb').start()
-    env = gym.make(env_string)
-    test_env = gym.make(env_string)
+    env_kwargs = dict()
+    if 'dm2gym' in env_string:
+        env_kwargs['flat_observation'] = True
+    env = gym.make(env_string, environment_kwargs=env_kwargs)
+    test_env = gym.make(env_string, environment_kwargs=env_kwargs)
     env.reset()
     test_env.reset()
     env = wrapper_func(env, **kwargs)
@@ -158,6 +170,16 @@ def initialize_environment(args):
         env, test_env = get_wrapped_env("MountainCar-v0", make_visual, shape=visual_cartpole_shape)
     elif args.env == "VisualAcrobot-v1":
         env, test_env = get_wrapped_env("Acrobot-v1", make_visual, shape=visual_pendulum_shape)
+    elif 'dm2gym' in args.env:
+        env, test_env = get_wrapped_env(
+                            args.env[6:] if 'Visual' in args.env else args.env,
+                            make_dm2gym,
+                            fake_display=False,
+                            shape=(84,84),# only used in visual mode
+                            stack=args.num_frames,
+                            skip=args.action_repeat,
+                            visual=('Visual' in args.env),
+                        )
     elif args.env[:6] == 'Visual':
         env, test_env = get_wrapped_env(args.env[6:], make_visual, shape=(64,64))
     else:

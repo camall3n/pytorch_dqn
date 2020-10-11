@@ -38,7 +38,7 @@ class MLP(torch.nn.Module):
             The layer sizes as int, i.e. [10, 15, 15, 5]
         - activation : func
             Function for activation
-        - final_activation : func 
+        - final_activation : func
             Function for activation of the last layer
     """
     def __init__(self, layer_sizes, activation=torch.nn.ReLU, final_activation=None):
@@ -87,6 +87,27 @@ def build_phi_network(args, input_shape):
             torch.nn.ReLU(),
             Reshape(-1, output_size),
         ])
+    elif args.model_type == 'curl':
+        final_size = conv2d_size_out(input_shape, (3, 3), 2)
+        final_size = conv2d_size_out(final_size, (3, 3), 1)
+        final_size = conv2d_size_out(final_size, (3, 3), 1)
+        final_size = conv2d_size_out(final_size, (3, 3), 1)
+        output_size = final_size[0] * final_size[1] * 32
+        phi = torch.nn.Sequential(*[
+            torch.nn.Conv2d(args.num_frames, 32, kernel_size=(4, 4), stride=2),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
+            torch.nn.ReLU(),
+            torch.nn.Conv2d(32, 32, kernel_size=(3, 3), stride=1),
+            torch.nn.ReLU(),
+            Reshape(-1, output_size),
+            torch.nn.Linear(output_size, args.latent_dim),
+            torch.nn.LayerNorm(args.latent_dim),
+            torch.nn.Tanh()
+        ])
+        output_size = args.latent_dim
     elif args.model_type == 'mlp':
         if args.model_shape == 'small':
             layer_sizes = [(64, 64), (64, 64)]
@@ -122,19 +143,35 @@ class InverseModel(torch.nn.Module):
             The size of the abstract state
         - num_actions : Int
             The number of actions in the environment
-    
-    Notes:
-        - This does not support continuous action spaces right now. TODO
+
     """
-    def __init__(self, args, feature_size, num_actions):
+    def __init__(self, args, feature_size, num_actions, discrete=False):
         super(InverseModel, self).__init__()
-        self.model = torch.nn.Sequential(torch.nn.Linear(feature_size * 2, args.hidden_size),
-                                         torch.nn.ReLU(),
-                                         torch.nn.Linear(args.hidden_size, num_actions))
+        self.discrete = discrete
+        self.body = torch.nn.Sequential(
+            torch.nn.Linear(feature_size * 2, args.hidden_size),
+            torch.nn.ReLU(),
+            torch.nn.Linear(args.hidden_size, args.hidden_size),
+            torch.nn.ReLU(),
+        )
+        if self.discrete:
+            self.log_pr_linear = torch.nn.Linear(args.hidden_size, num_actions)
+        else:
+            self.mean_linear = torch.nn.Linear(args.hidden_size, num_actions)
+            self.log_std_linear = torch.nn.Linear(args.hidden_size, num_actions)
 
     def forward(self, z0, z1):
         context = torch.cat((z0, z1), -1)
-        return self.model(context)
+        shared_vector = self.body(context)
+
+        if self.discrete:
+            return self.log_pr_linear(shared_vector)
+        else:
+            mean = self.mean_linear(shared_vector)
+            log_std = self.log_std_linear(shared_vector)
+            log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)
+            std = log_std.exp()
+            return mean, std
 
 
 class ContrastiveModel(torch.nn.Module):
@@ -171,25 +208,36 @@ class MarkovHead(torch.nn.Module):
             The size of the abstract state
         - num_actions : Int
             The number of actions in the environment
-    
+
     Notes:
         - This does not support continuous action spaces right now. TODO
     """
     def __init__(self, args, feature_size, num_actions):
         super(MarkovHead, self).__init__()
-        self.inverse_model = InverseModel(args, feature_size, num_actions)
+        self.discrete = hasattr(args, 'discrete') and args.discrete
+        self.n_actions = num_actions
+
+        self.inverse_model = InverseModel(args, feature_size, num_actions, discrete=self.discrete)
         self.discriminator = ContrastiveModel(args, feature_size)
 
         self.bce = torch.nn.BCEWithLogitsLoss()
-        self.ce = torch.nn.CrossEntropyLoss()
+        if self.discrete:
+            self.ce = torch.nn.CrossEntropyLoss()
 
     def forward(self, *args, **kwargs):
         raise NotImplementedError
 
     def compute_markov_loss(self, z0, z1, a):
         # Inverse loss
-        log_pr_actions = self.inverse_model(z0, z1)
-        l_inverse = self.ce(input=log_pr_actions, target=a)
+        if self.discrete:
+            log_pr_actions = self.inverse_model(z0, z1)
+            l_inverse = self.ce(input=log_pr_actions, target=a)
+        else:
+            mean, std = self.inverse_model(z0, z1)
+            cov = torch.diag_embed(std, dim1=1, dim2=2)
+            normal = torch.distributions.MultivariateNormal(loc=mean, covariance_matrix=cov)
+            log_pr_action = normal.log_prob(a)
+            l_inverse = -1*log_pr_action.mean(dim=0)
 
         # Ratio loss
         with torch.no_grad():
@@ -233,7 +281,7 @@ class ValueNetwork(torch.nn.Module):
 
 
 class QNetwork(torch.nn.Module):
-    def __init__(self, input_shape, num_actions, hidden_dim, model_type, num_frames=None):
+    def __init__(self, args, input_shape, num_actions, hidden_dim, model_type, num_frames=None, encoder=None, output_size=None):
         super(QNetwork, self).__init__()
 
         if len(input_shape) > 2:
@@ -253,37 +301,39 @@ class QNetwork(torch.nn.Module):
                                           torch.nn.Linear(hidden_dim, hidden_dim),
                                           torch.nn.ReLU(),
                                           torch.nn.Linear(hidden_dim, 1))
-        elif model_type == 'cnn':
+        elif model_type in ['cnn', 'curl']:
             assert num_frames is not None, "Must provide num frames"
 
-            final_size = conv2d_size_out(input_shape, (8, 8), 4)
-            final_size = conv2d_size_out(final_size, (4, 4), 2)
-            final_size = conv2d_size_out(final_size, (3, 3), 1)
-            output_size = final_size[0] * final_size[1] * 64
+            if encoder is not None:
+                self.body1 = encoder
+                self.body2 = self.body1
+                output_size = output_size
+            else:
+                self.body1, output_size = build_phi_network(args, input_shape)
+                self.body2, _ = build_phi_network(args, input_shape)
 
-            self.body1 = torch.nn.Sequential(
-                torch.nn.Conv2d(num_frames, 32, kernel_size=(8, 8), stride=4),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(32, 64, kernel_size=(4, 4), stride=2),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(64, 64, kernel_size=(3, 3), stride=1),
-                torch.nn.ReLU(),
-                Reshape(-1, output_size))
+        if model_type == 'cnn':
             self.q1 = torch.nn.Sequential(torch.nn.Linear(output_size + num_actions, hidden_dim),
                                           torch.nn.ReLU(),
                                           torch.nn.Linear(hidden_dim, 1))
-
-            self.body2 = torch.nn.Sequential(
-                torch.nn.Conv2d(num_frames, 32, kernel_size=(8, 8), stride=4),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(32, 64, kernel_size=(4, 4), stride=2),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(64, 64, kernel_size=(3, 3), stride=1),
-                torch.nn.ReLU(),
-                Reshape(-1, output_size))
             self.q2 = torch.nn.Sequential(torch.nn.Linear(output_size + num_actions, hidden_dim),
                                           torch.nn.ReLU(),
                                           torch.nn.Linear(hidden_dim, 1))
+        elif model_type == 'curl':
+            self.q1 = torch.nn.Sequential(
+                torch.nn.Linear(output_size + num_actions, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, 1)
+            )
+            self.q2 = torch.nn.Sequential(
+                torch.nn.Linear(output_size + num_actions, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, hidden_dim),
+                torch.nn.ReLU(),
+                torch.nn.Linear(hidden_dim, 1)
+            )
 
         self.apply(weights_init_)
 
@@ -291,25 +341,42 @@ class QNetwork(torch.nn.Module):
         print(repr(self))
         print("Number of trainable parameters: {}".format(trainable_parameters))
 
-    def forward(self, state, action):
-        if self.model_type == 'cnn':
-            x1 = self.q1(torch.cat([self.body1(state), action], 1))
-            x2 = self.q2(torch.cat([self.body2(state), action], 1))
+    def encode(self, state):
+        if self.body1 == self.body2:
+            rep = self.body1(state)
+            return rep, rep
+        else:
+            rep1 = self.body1(state)
+            rep2 = self.body2(state)
+            return rep1, rep2
+
+    def forward(self, state, action, return_rep=False):
+        if self.model_type in ['cnn', 'curl']:
+            rep1, rep2 = self.encode(state)
+            x1 = self.q1(torch.cat([rep1, action], 1))
+            x2 = self.q2(torch.cat([rep2, action], 1))
         elif self.model_type == 'mlp':
             xu = torch.cat([state, action], 1)
             x1 = self.q1(xu)
             x2 = self.q2(xu)
-        return x1, x2
+        if return_rep:
+            return x1, x2, rep1, rep2
+        else:
+            return x1, x2
 
 
 class GaussianPolicy(torch.nn.Module):
     def __init__(self,
+                 args,
                  input_shape,
                  num_actions,
                  hidden_dim,
                  model_type,
                  num_frames=None,
-                 action_space=None):
+                 action_space=None,
+                 encoder=None,
+                 output_size=None,
+                 detach_encoder=False):
         super(GaussianPolicy, self).__init__()
 
         if len(input_shape) > 2:
@@ -322,26 +389,21 @@ class GaussianPolicy(torch.nn.Module):
                                             torch.nn.Linear(hidden_dim, hidden_dim),
                                             torch.nn.ReLU())
 
-        elif model_type == 'cnn':
+        elif model_type in ['cnn', 'curl']:
             assert num_frames is not None, "Must provide num frames"
 
-            final_size = conv2d_size_out(input_shape, (8, 8), 4)
-            final_size = conv2d_size_out(final_size, (4, 4), 2)
-            final_size = conv2d_size_out(final_size, (3, 3), 1)
-            output_size = final_size[0] * final_size[1] * 64
-
+            if encoder is not None:
+                self.encoder = encoder
+                output_size = output_size
+            else:
+                self.encoder, output_size = build_phi_network(args, input_shape)
+            self.detach_encoder = detach_encoder
             self.body = torch.nn.Sequential(
-                torch.nn.Conv2d(num_frames, 32, kernel_size=(8, 8), stride=4),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(32, 64, kernel_size=(4, 4), stride=2),
-                torch.nn.ReLU(),
-                torch.nn.Conv2d(64, 64, kernel_size=(3, 3), stride=1),
-                torch.nn.ReLU(),
-                Reshape(-1, output_size),
                 torch.nn.Linear(output_size, hidden_dim),
                 torch.nn.ReLU(),
                 torch.nn.Linear(hidden_dim, hidden_dim),
-                torch.nn.ReLU())
+                torch.nn.ReLU()
+            )
 
         self.mean_linear = torch.nn.Linear(hidden_dim, num_actions)
         self.log_std_linear = torch.nn.Linear(hidden_dim, num_actions)
@@ -360,7 +422,10 @@ class GaussianPolicy(torch.nn.Module):
         print("Number of trainable parameters: {}".format(trainable_parameters))
 
     def forward(self, state):
-        x = self.body(state)
+        rep = self.encoder(state)
+        if self.detach_encoder:
+            rep = rep.detach()
+        x = self.body(rep)
         mean = self.mean_linear(x)
         log_std = self.log_std_linear(x)
         log_std = torch.clamp(log_std, min=LOG_SIG_MIN, max=LOG_SIG_MAX)

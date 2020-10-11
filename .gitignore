@@ -128,15 +128,16 @@ dmypy.json
 # Pyre type checker
 .pyre/
 
-# Custom 
+# Custom
 runs/
 .onager/
 saved_models/
 reward_log/
 logs/
 profile.out
-*.tar 
+*.tar
 *.pth
 .idea
 .vscode/
 .vim/
+results/
